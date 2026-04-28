@@ -9,8 +9,9 @@ export interface Hole {
   cone?: number;        // launch-angle spread (rad); undefined = HOLE_DEFAULT_CONE
 }
 
-export const HOLE_DEFAULT_SPEED = 20;
-export const HOLE_DEFAULT_CONE = 0.85;
+export const HOLE_DEFAULT_SPEED = 15;
+export const HOLE_DEFAULT_CONE = 0;
+export const HOLE_DEFAULT_WIDTH = 20;
 
 export type Quality = "low" | "medium" | "high" | "ultra";
 

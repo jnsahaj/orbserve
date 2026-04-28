@@ -1,18 +1,9 @@
 import { FlipHorizontal2, FlipVertical2, Trash2, X } from "lucide-react";
 import { Slider } from "@/components/ui/slider";
 import { Button } from "@/components/ui/button";
-import {
-  Select,
-  SelectContent,
-  SelectGroup,
-  SelectItem,
-  SelectTrigger,
-  SelectValue,
-} from "@/components/ui/select";
 import { InfoLabel } from "@/components/InfoLabel";
 import {
   type Hole,
-  type HoleSide,
   HOLE_DEFAULT_SPEED,
   HOLE_DEFAULT_CONE,
 } from "@/lib/types";
@@ -53,24 +44,6 @@ export function HoleInlineEditor({
         </button>
       </div>
       <div className="flex flex-col gap-2 px-2.5 py-2.5">
-        <Row label="side" tip="Which container wall this hole is on. Drag the hole on the canvas to switch sides freely.">
-          <Select
-            value={hole.side}
-            onValueChange={(v) => onChange({ side: v as HoleSide })}
-          >
-            <SelectTrigger className="h-7 px-2 text-[11px]">
-              <SelectValue />
-            </SelectTrigger>
-            <SelectContent>
-              <SelectGroup>
-                <SelectItem value="bottom">bottom</SelectItem>
-                <SelectItem value="top">top</SelectItem>
-                <SelectItem value="left">left</SelectItem>
-                <SelectItem value="right">right</SelectItem>
-              </SelectGroup>
-            </SelectContent>
-          </Select>
-        </Row>
         <SliderRow
           label="offset"
           tip="Position along the wall. 0 = top/left edge, 100 = bottom/right edge."
@@ -139,23 +112,6 @@ export function HoleInlineEditor({
           <Trash2 data-icon="inline-start" /> Delete
         </Button>
       </div>
-    </div>
-  );
-}
-
-function Row({
-  label, tip, children,
-}: {
-  label: string;
-  tip: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <div className="grid grid-cols-[44px_1fr] items-center gap-2">
-      <InfoLabel tip={tip} className={ROW_LABEL_CLASS}>
-        {label}
-      </InfoLabel>
-      {children}
     </div>
   );
 }

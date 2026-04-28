@@ -17,6 +17,7 @@ interface RendererState {
   pixiParticles: (Particle | null)[];
   visible: Uint8Array;
   domSprite: Sprite | null;
+  loadingTickerId: number | null;   // RAF id of the active loading-pulse loop
 }
 
 export interface RendererHandle {
@@ -46,6 +47,17 @@ export interface RendererHandle {
     containerLeft: number,
     containerTop: number,
     drawLastFrame: () => void,
+  ) => void;
+  /** Wipe every particle currently on stage. Used at run start so the
+      previous run's image doesn't linger during the new precompute. */
+  clearParticles: () => void;
+  /** Show a faint, gently-pulsing copy of the source image on the stage as
+      a "we're working on it" indicator. Stays up until reset() is called. */
+  showLoading: (
+    sourceCanvas: HTMLCanvasElement,
+    container: ContainerSize,
+    containerLeft: number,
+    containerTop: number,
   ) => void;
   reset: () => void;
 }
@@ -96,6 +108,7 @@ export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): 
         pixiParticles: [],
         visible: new Uint8Array(0),
         domSprite: null,
+        loadingTickerId: null,
       };
     })();
   }, [canvasRef]);
@@ -110,17 +123,16 @@ export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): 
       const ctx = sourceCanvas.getContext("2d")!;
       const data = ctx.getImageData(0, 0, container.w, container.h).data;
 
-      let particles = s.pixiParticles;
-      let visible = s.visible;
-      if (!particles || particles.length !== N) {
-        for (const p of particles) if (p) particleContainer.removeParticle(p);
-        particles = new Array(N).fill(null);
-        visible = new Uint8Array(N);
-        s.pixiParticles = particles;
-        s.visible = visible;
-      } else {
-        visible.fill(0);
-      }
+      // Always start from a clean slate. Reusing particles between runs is
+      // an attractive nuisance — old tints and stale positions can leak
+      // between runs in subtle ways, and have caused "scrambled final
+      // image" bugs after parameter tweaks. Worth the small cost of
+      // re-allocating N Pixi particles per run.
+      for (const p of s.pixiParticles) if (p) particleContainer.removeParticle(p);
+      const particles = new Array(N).fill(null);
+      const visible = new Uint8Array(N);
+      s.pixiParticles = particles;
+      s.visible = visible;
       const lastOff = (total - 1) * N;
       const radiusScale = (ballRadius * 2) / CIRCLE_TEX_SIZE;
       let colored = 0;
@@ -161,6 +173,13 @@ export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): 
           particleContainer.removeParticle(particles[i]!);
           particles[i] = null;
         }
+      }
+      // Park every particle off-screen so that, between bake and the first
+      // drawFrame call, the renderer doesn't briefly composite particles at
+      // wherever they happened to be from the previous run's last frame.
+      for (let i = 0; i < N; i++) {
+        const p = particles[i];
+        if (p) { p.x = -9999; p.y = -9999; }
       }
       return colored;
     },
@@ -215,9 +234,67 @@ export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): 
       tick();
     },
 
+    clearParticles() {
+      const s = stateRef.current;
+      if (!s) return;
+      const { particleContainer, pixiParticles } = s;
+      for (const p of pixiParticles) if (p) particleContainer.removeParticle(p);
+      s.pixiParticles = [];
+      s.visible = new Uint8Array(0);
+      // Force one render so the canvas immediately shows nothing — without
+      // this the prior frame stays on screen until the next drawFrame call,
+      // which can be seconds away while a precompute is running.
+      s.app.renderer.render(s.app.stage);
+    },
+
+    showLoading(sourceCanvas, container, cLeft, cTop) {
+      const s = stateRef.current;
+      if (!s) return;
+      // Tear down anything we previously had up.
+      if (s.loadingTickerId != null) {
+        cancelAnimationFrame(s.loadingTickerId);
+        s.loadingTickerId = null;
+      }
+      if (s.domSprite) {
+        s.app.stage.removeChild(s.domSprite);
+        s.domSprite.destroy();
+        s.domSprite = null;
+      }
+      const tex = Texture.from(sourceCanvas);
+      tex.source.update?.();
+      const sprite = new Sprite(tex);
+      sprite.x = cLeft;
+      sprite.y = cTop;
+      sprite.width = container.w;
+      sprite.height = container.h;
+      sprite.alpha = 0;
+      s.app.stage.addChild(sprite);
+      s.domSprite = sprite;
+
+      // Pulse: fade in to 0.18, breathe between 0.10 and 0.22, fast easing.
+      // Reads as "the system is alive and chewing on this image" without
+      // ever distracting from the eventual reveal.
+      const t0 = performance.now();
+      const tick = () => {
+        const cur = stateRef.current;
+        if (!cur || cur.domSprite !== sprite) return;
+        const t = (performance.now() - t0) / 1000;
+        const ease = Math.min(1, t / 0.4);                     // 400ms fade-in
+        const breath = 0.16 + 0.06 * Math.sin(t * 2.4);        // gentle pulse
+        sprite.alpha = ease * breath;
+        cur.app.renderer.render(cur.app.stage);
+        cur.loadingTickerId = requestAnimationFrame(tick);
+      };
+      s.loadingTickerId = requestAnimationFrame(tick);
+    },
+
     reset() {
       const s = stateRef.current;
       if (!s) return;
+      if (s.loadingTickerId != null) {
+        cancelAnimationFrame(s.loadingTickerId);
+        s.loadingTickerId = null;
+      }
       if (s.domSprite) {
         s.app.stage.removeChild(s.domSprite);
         s.domSprite.destroy();

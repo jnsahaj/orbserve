@@ -17,6 +17,7 @@ import {
   deriveQuality,
   HOLE_DEFAULT_CONE,
   HOLE_DEFAULT_SPEED,
+  HOLE_DEFAULT_WIDTH,
   mirrorH as mirrorHFn,
   mirrorV as mirrorVFn,
 } from "@/lib/types";
@@ -31,7 +32,7 @@ const DEFAULT_PARAMS: SimParams = {
 };
 
 const DEFAULT_HOLES: Hole[] = [
-  { side: "bottom", offset: 0.5, width: 100, angle: 0 },
+  { side: "bottom", offset: 0.5, width: HOLE_DEFAULT_WIDTH, angle: 0, speed: HOLE_DEFAULT_SPEED, cone: HOLE_DEFAULT_CONE },
 ];
 
 export default function App() {
@@ -164,10 +165,23 @@ export default function App() {
     setProgress(0);
     setShowSource(false);
     playingRef.current = false;
+    // Clear refs that capture the previous run's recording. Any stale RAF
+    // that still fires before the new precompute lands will see no rec
+    // and bail, instead of redrawing run-N-1 data on top of run-N state.
+    recRef.current = null;
+    frameRef.current = 0;
     renderer.reset();
 
     const cLeft = viewport.w / 2 - containerSize.w / 2;
     const cTop = viewport.h / 2 - containerSize.h / 2;
+
+    // Visual handover: nuke the previous image's particles immediately and
+    // show a faint, pulsing preview of the new source image while the
+    // worker chews. Without this the old image lingers on the canvas for
+    // the entire precompute window.
+    renderer.clearParticles();
+    renderSource();
+    renderer.showLoading(sourceCanvasRef.current!, containerSize, cLeft, cTop);
 
     w.onmessage = (e: MessageEvent<WorkerMessage>) => {
       const msg = e.data;
@@ -191,6 +205,8 @@ export default function App() {
         };
         setHasCache(true);
         renderSource();
+        // Tear down the pulsing loading preview before particles appear.
+        renderer.reset();
         const c = renderer.bake(
           msg.recX, msg.recY, msg.scale, msg.N, msg.TOTAL,
           sourceCanvasRef.current!, containerSize, cLeft, cTop, derived.ballRadius,
@@ -319,7 +335,7 @@ export default function App() {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
       if (e.key === "r") replay();
-      if (e.key === "Enter" && dirtyRef.current) newRun();
+      if (e.key === "Enter" && dirtyRef.current && phase !== "precomputing") newRun();
       if ((e.key === "Backspace" || e.key === "Delete") && selectedHole >= 0 && holes.length > 1) {
         setHolesUpdating(holes.filter((_, i) => i !== selectedHole));
         setSelectedHole(-1);
@@ -327,14 +343,14 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [replay, newRun, holes, selectedHole, setHolesUpdating]);
+  }, [replay, newRun, holes, selectedHole, setHolesUpdating, phase]);
 
   const addHole = () => {
     const sides = ["bottom", "top", "left", "right"] as const;
     const next = sides[holes.length % sides.length];
     setHolesUpdating([
       ...holes,
-      { side: next, offset: 0.5, width: 100, angle: 0, speed: HOLE_DEFAULT_SPEED, cone: HOLE_DEFAULT_CONE },
+      { side: next, offset: 0.5, width: HOLE_DEFAULT_WIDTH, angle: 0, speed: HOLE_DEFAULT_SPEED, cone: HOLE_DEFAULT_CONE },
     ]);
     setSelectedHole(holes.length);
   };
