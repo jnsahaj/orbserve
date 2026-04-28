@@ -246,7 +246,12 @@ export default function App() {
     const rec = recRef.current;
     if (!rec) return;
 
+    // Prefer MP4 (plays everywhere — QuickTime, iOS, social uploads). Falls
+    // back to WebM only on browsers without H.264 in MediaRecorder (Firefox
+    // as of 2026).
     const mimeTypes = [
+      "video/mp4;codecs=avc1.42E01E",
+      "video/mp4",
       "video/webm;codecs=vp9",
       "video/webm;codecs=vp8",
       "video/webm",
@@ -257,6 +262,9 @@ export default function App() {
       alert("Video export isn't supported in this browser.");
       return;
     }
+    const isMp4 = mimeType.startsWith("video/mp4");
+    const ext = isMp4 ? "mp4" : "webm";
+    const blobType = isMp4 ? "video/mp4" : "video/webm";
 
     const sim = useSimStore.getState();
     const cSize = containerForAR(sim.imgAR, sim.viewport);
@@ -329,12 +337,12 @@ export default function App() {
     frameRef.current = rec.total - 1;
     renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, rec.total - 1);
 
-    const blob = new Blob(chunks, { type: "video/webm" });
+    const blob = new Blob(chunks, { type: blobType });
     const url = URL.createObjectURL(blob);
     const a = document.createElement("a");
     a.href = url;
     const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    a.download = `reveal-${ts}.webm`;
+    a.download = `reveal-${ts}.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -695,7 +703,7 @@ export default function App() {
             <button
               onClick={exportVideo}
               disabled={!canExport}
-              title={exporting ? `Exporting… ${Math.round(exportProgress * 100)}%` : "Export simulation as a video (.webm)"}
+              title={exporting ? `Exporting… ${Math.round(exportProgress * 100)}%` : "Export simulation as a video (.mp4 / .webm)"}
               className={cn(
                 "grid w-10 place-items-center transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
                 exporting ? "text-foreground/90" : "text-muted-foreground",
