@@ -1,9 +1,6 @@
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import {
-  type Hole,
-  type HoleSide,
-} from "@/lib/types";
+import { type Hole, type HoleSide } from "@/lib/types";
 
 interface Props {
   holes: Hole[];
@@ -24,7 +21,6 @@ export function HolesPanel({ holes, selected, onChange, onSelect, onAdd }: Props
   const canDelete = holes.length > 1;
   return (
     <div>
-      {/* Hole list — each row is selectable, shows direction + position. */}
       <ul className="overflow-hidden rounded-lg border border-border/60 bg-foreground/[0.025]">
         {holes.map((h, i) => {
           const Icon = SIDE_ICON[h.side];

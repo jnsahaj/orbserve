@@ -9,11 +9,6 @@ interface Props {
   side?: "top" | "right" | "bottom" | "left";
 }
 
-/**
- * A label rendered with a small (i) info marker. Hover reveals the tip.
- * Used everywhere a parameter name appears so the user can learn what
- * the knob does without having to guess.
- */
 export function InfoLabel({ children, tip, className, side = "top" }: Props) {
   return (
     <Tooltip>

@@ -5,70 +5,48 @@
 @tailwind utilities;
 
 @layer base {
-  /* shots.so-flavored cream paper + ember accent.
-     We keep the original token names so existing shadcn components stay valid;
-     the values flip to a warm light-on-dark "paper chrome over dark canvas" theme. */
+  /* Warm cream paper + ember accent. Token names match shadcn so the
+     stock components keep working. */
   :root {
-    /* Canvas behind everything — only visible at edges since the WebGL
-       canvas covers the viewport. Warm paper cream. */
     --background: 38 26% 95%;
     --foreground: 36 18% 9%;
-
-    /* Panels — translucent ivory, sit on the dark canvas like sticky notes. */
     --card: 38 26% 96%;
     --card-foreground: 36 18% 9%;
     --popover: 38 26% 97%;
     --popover-foreground: 36 18% 9%;
-
-    /* Ember — the shots.so signature. Used for the primary CTA + active states. */
     --primary: 16 89% 55%;
     --primary-foreground: 38 30% 97%;
-
     --secondary: 36 14% 88%;
     --secondary-foreground: 36 18% 14%;
-
     --muted: 36 12% 84%;
     --muted-foreground: 36 8% 36%;
-
     --accent: 36 14% 90%;
     --accent-foreground: 36 18% 14%;
-
     --destructive: 0 72% 50%;
     --destructive-foreground: 38 30% 97%;
-
     --border: 36 14% 84%;
     --input: 36 14% 80%;
     --ring: 16 89% 55%;
-
     --radius: 0.875rem;
   }
 
-  /* Dark mode — warm-black paper, ember accent retained.
-     Triggered by `class="dark"` on <html> (matches tailwind darkMode: "class"). */
   .dark {
     --background: 30 10% 6%;
     --foreground: 38 26% 94%;
-
     --card: 30 10% 9%;
     --card-foreground: 38 26% 94%;
     --popover: 30 10% 10%;
     --popover-foreground: 38 26% 94%;
-
     --primary: 16 89% 58%;
     --primary-foreground: 30 12% 7%;
-
     --secondary: 30 8% 14%;
     --secondary-foreground: 38 26% 94%;
-
     --muted: 30 8% 13%;
     --muted-foreground: 36 10% 64%;
-
     --accent: 30 8% 15%;
     --accent-foreground: 38 26% 94%;
-
     --destructive: 0 72% 55%;
     --destructive-foreground: 38 30% 97%;
-
     --border: 30 8% 18%;
     --input: 30 8% 20%;
     --ring: 16 89% 58%;
@@ -88,8 +66,9 @@
     -moz-osx-font-smoothing: grayscale;
   }
 
-  /* Whole-page warm grain — gives the cream paper character against the
-     pure-black physics canvas. Sits between canvas (z-0) and panels (z-10). */
+  /* Whole-page warm grain. Sits between the canvas (z-0) and the panels
+     (z-10). Two variants because cream paper wants screen blend, warm
+     black wants overlay. */
   body::before {
     content: "";
     position: fixed; inset: 0;
@@ -115,13 +94,10 @@
   }
   ::-webkit-scrollbar-thumb:hover { background: hsl(36 16% 18% / 0.28); background-clip: padding-box; border: 2px solid transparent; }
 
-  /* Pleasant text selection in the ember palette */
   ::selection { background: hsl(16 89% 55% / 0.22); color: hsl(36 18% 9%); }
 }
 
 @layer utilities {
-  /* The new "glass" — warm paper, elevated. Derives from semantic tokens
-     so light/dark flips automatically via :root vs .dark. */
   .glass {
     background: hsl(var(--card) / 0.86);
     backdrop-filter: blur(18px) saturate(115%);
@@ -142,25 +118,11 @@
       0 8px 20px -12px rgba(0, 0, 0, 0.55);
   }
 
-  /* Subtle elevated surface for nested cards inside panels */
-  .paper {
-    background: hsl(var(--card));
-    border: 1px solid hsl(var(--border) / 0.6);
-    box-shadow:
-      0 1px 0 hsl(var(--background) / 0.7) inset,
-      0 1px 2px hsl(var(--foreground) / 0.04);
-  }
-
-  .diffusion-shadow {
-    box-shadow: 0 24px 50px -20px rgba(36, 22, 8, 0.45);
-  }
-
   .mono {
     font-family: "Geist Mono", ui-monospace, "SF Mono", monospace;
     font-feature-settings: "ss01", "zero";
   }
 
-  /* Distinctive display serif — the shots.so editorial accent. */
   .display {
     font-family: "Instrument Serif", "Times New Roman", serif;
     font-weight: 400;
@@ -173,23 +135,13 @@
     letter-spacing: -0.005em;
   }
 
-  /* Vibrant ember halo — for the primary CTA when there's pending state.
-     Derives from --primary so the glow matches whatever the accent is. */
-  .ember-glow {
-    box-shadow:
-      0 1px 0 hsl(var(--primary-foreground) / 0.18) inset,
-      0 8px 22px -10px hsl(var(--primary) / 0.55),
-      0 18px 40px -18px hsl(var(--primary) / 0.4);
-  }
-
-  /* Soft warm vignette inside a panel — wallpaper feel. */
   .warm-vignette {
     background-image:
       radial-gradient(120% 80% at 0% 0%, hsl(var(--primary) / 0.10), transparent 60%),
       radial-gradient(100% 80% at 100% 100%, hsl(var(--primary) / 0.06), transparent 65%);
   }
 
-  /* Sequential reveal cascade — staggered children via --i. */
+  /* Staggered children via --i, used by ImagePicker. */
   .cascade > * {
     opacity: 0;
     transform: translateY(4px);

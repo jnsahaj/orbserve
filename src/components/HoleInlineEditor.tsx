@@ -109,7 +109,7 @@ export function HoleInlineEditor({
           disabled={totalHoles <= 1}
           className="gap-1 text-muted-foreground hover:text-destructive"
         >
-          <Trash2 data-icon="inline-start" /> Delete
+          <Trash2 /> Delete
         </Button>
       </div>
     </div>

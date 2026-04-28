@@ -13,6 +13,25 @@ export const HOLE_DEFAULT_SPEED = 15;
 export const HOLE_DEFAULT_CONE = 0;
 export const HOLE_DEFAULT_WIDTH = 20;
 
+export function makeHole(side: HoleSide): Hole {
+  return {
+    side,
+    offset: 0.5,
+    width: HOLE_DEFAULT_WIDTH,
+    angle: 0,
+    speed: HOLE_DEFAULT_SPEED,
+    cone: HOLE_DEFAULT_CONE,
+  };
+}
+
+export type Phase =
+  | "loading"
+  | "idle"
+  | "precomputing"
+  | "fountaining"
+  | "settled"
+  | "error";
+
 export type Quality = "low" | "medium" | "high" | "ultra";
 
 export interface QualityPreset {
@@ -53,7 +72,6 @@ export function deriveQuality(q: Quality, c: ContainerSize): DerivedQuality {
   };
 }
 
-// Slimmer SimParams: physics-only knobs. Per-hole emission lives on Hole.
 export interface SimParams {
   QUALITY: Quality;
   RESTITUTION: number;
@@ -61,7 +79,6 @@ export interface SimParams {
   GRAVITY: number;
 }
 
-// Max container box (px). Image AR is fitted within these bounds.
 export const MAX_CONTAINER_W = 720;
 export const MAX_CONTAINER_H = 480;
 
@@ -72,8 +89,6 @@ export function containerForAR(ar: number): ContainerSize {
   return { w: Math.round(MAX_CONTAINER_H * ar), h: MAX_CONTAINER_H };
 }
 
-// Wire-format passed to the worker. Quality is pre-resolved so the worker
-// stays a dumb consumer of concrete numbers — no preset table duplication.
 export interface PrecomputeMessage {
   type: "precompute";
   seed: number;
@@ -110,7 +125,7 @@ export type WorkerMessage =
   | { type: "error"; seed: number; message: string }
   | PrecomputeResult;
 
-export const baseAnglesByside: Record<HoleSide, number> = {
+export const baseAnglesBySide: Record<HoleSide, number> = {
   bottom: -Math.PI / 2,
   top: Math.PI / 2,
   left: 0,
@@ -130,7 +145,4 @@ export function mirrorV(h: Hole): Hole {
   const offset =
     h.side === "left" || h.side === "right" ? 1 - h.offset : h.offset;
   return { ...h, side, offset, angle: -h.angle };
-}
-export function holeKey(h: Hole) {
-  return `${h.side}|${Math.round(h.offset * 1000)}|${Math.round(h.angle)}`;
 }

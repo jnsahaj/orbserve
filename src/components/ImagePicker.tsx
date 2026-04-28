@@ -8,11 +8,9 @@ interface Props {
   onSelect: (key: string, drawer: Drawer, ar: number) => void;
 }
 
-// Every thumbnail renders at the same 7:5 tile aspect, filling completely.
-// Drawers are aspect-agnostic (they take {w,h}) so this composes cleanly
-// without letterbox bars or squished samples.
 const TILE_W = 240;
 const TILE_H = 172;
+
 function SampleThumb({ draw }: { draw: Drawer }) {
   const ref = useRef<HTMLCanvasElement>(null);
   useEffect(() => {

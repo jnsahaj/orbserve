@@ -11,18 +11,20 @@ import { InfoLabel } from "@/components/InfoLabel";
 import { SAMPLES, type Drawer } from "@/lib/samples";
 import {
   type Hole,
+  type Phase,
   type SimParams,
   type WorkerMessage,
   containerForAR,
   deriveQuality,
-  HOLE_DEFAULT_CONE,
-  HOLE_DEFAULT_SPEED,
-  HOLE_DEFAULT_WIDTH,
+  makeHole,
   mirrorH as mirrorHFn,
   mirrorV as mirrorVFn,
 } from "@/lib/types";
 import { usePixiRenderer } from "@/hooks/usePixiRenderer";
 import { cn } from "@/lib/utils";
+
+const LEFT_PANEL_W = 300;
+const RIGHT_PANEL_W = 320;
 
 const DEFAULT_PARAMS: SimParams = {
   QUALITY: "medium",
@@ -31,9 +33,9 @@ const DEFAULT_PARAMS: SimParams = {
   GRAVITY: 0,
 };
 
-const DEFAULT_HOLES: Hole[] = [
-  { side: "bottom", offset: 0.5, width: HOLE_DEFAULT_WIDTH, angle: 0, speed: HOLE_DEFAULT_SPEED, cone: HOLE_DEFAULT_CONE },
-];
+const DEFAULT_HOLES: Hole[] = [makeHole("bottom")];
+
+const SECTION_LABEL = "text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70";
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -42,16 +44,13 @@ export default function App() {
   const [params, setParams] = useState<SimParams>(DEFAULT_PARAMS);
   const [holes, setHoles] = useState<Hole[]>(DEFAULT_HOLES);
   const [selectedHole, setSelectedHole] = useState(-1);
-  const [seed, setSeed] = useState(() => (Math.random() * 1e9) | 0);
 
-  const [phase, setPhase] = useState<
-    "loading" | "idle" | "precomputing" | "fountaining" | "settled" | "error"
-  >("loading");
+  const [phase, setPhase] = useState<Phase>("loading");
   const [progress, setProgress] = useState(0);
   const [colored, setColored] = useState(0);
   const [hasCache, setHasCache] = useState(false);
-  // Mirrors `dirtyRef` for rendering. dirtyRef stays for synchronous
-  // checks inside callbacks; this is purely the visual flag for "New run".
+  // Mirror of dirtyRef. The ref is for synchronous reads inside callbacks;
+  // this drives re-renders of the Reveal CTA.
   const [dirty, setDirty] = useState(true);
 
   const [imageKey, setImageKey] = useState("reveal");
@@ -60,7 +59,6 @@ export default function App() {
 
   const [showSource, setShowSource] = useState(false);
 
-  // Theme — persisted across reloads, applied as a `dark` class on <html>.
   const [theme, setTheme] = useState<"light" | "dark">(() => {
     const stored = typeof localStorage !== "undefined" ? localStorage.getItem("theme") : null;
     if (stored === "light" || stored === "dark") return stored;
@@ -69,8 +67,7 @@ export default function App() {
       : "light";
   });
   useEffect(() => {
-    const root = document.documentElement;
-    root.classList.toggle("dark", theme === "dark");
+    document.documentElement.classList.toggle("dark", theme === "dark");
     localStorage.setItem("theme", theme);
   }, [theme]);
   const toggleTheme = useCallback(() => {
@@ -93,6 +90,11 @@ export default function App() {
     return () => window.removeEventListener("resize", onResize);
   }, []);
 
+  const containerOrigin = useMemo(() => ({
+    left: viewport.w / 2 - containerSize.w / 2,
+    top: viewport.h / 2 - containerSize.h / 2,
+  }), [viewport.w, viewport.h, containerSize.w, containerSize.h]);
+
   const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
   if (!sourceCanvasRef.current) {
     sourceCanvasRef.current = document.createElement("canvas");
@@ -112,10 +114,12 @@ export default function App() {
 
   const workerRef = useRef<Worker | null>(null);
   if (!workerRef.current) {
-    workerRef.current = new Worker(new URL("./worker.js", import.meta.url), {
-      type: "module",
-    });
+    workerRef.current = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
   }
+  // No cleanup: worker is a page-lifetime singleton. Terminating on unmount
+  // races StrictMode's double-mount and orphans the in-flight first-run
+  // precompute (its "done" arrives at a freshly-spawned successor with no
+  // matching seed and gets dropped, leaving the user stuck at 0%).
 
   const recRef = useRef<{
     recX: Uint16Array;
@@ -132,11 +136,9 @@ export default function App() {
   };
   const playingRef = useRef(false);
   const frameRef = useRef(0);
-  // Tracks the seed of the most recently *requested* precompute. Used to
-  // drop stale responses from a worker that finished an earlier request
-  // before the latest one — without this gate, the previous run's recording
-  // gets baked into the renderer with the latest closure's params, producing
-  // a "mush" of wrong-color balls landing in wrong positions.
+  // Seed of the most recently *requested* precompute. The handler checks
+  // every message against this so a previous run's "done" can't get baked
+  // into the renderer with the latest closure's params.
   const latestSeedRef = useRef(0);
 
   const tick = useCallback(() => {
@@ -153,32 +155,20 @@ export default function App() {
     requestAnimationFrame(tick);
   }, [renderer]);
 
-  // Run a fresh precompute. Bumps the seed so each "New run" yields
-  // different stochastic emission, and resets dirty state when the
-  // worker completes successfully.
   const newRun = useCallback(() => {
     const w = workerRef.current!;
     const nextSeed = (Math.random() * 1e9) | 0;
     latestSeedRef.current = nextSeed;
-    setSeed(nextSeed);
     setPhase("precomputing");
     setProgress(0);
     setShowSource(false);
     playingRef.current = false;
-    // Clear refs that capture the previous run's recording. Any stale RAF
-    // that still fires before the new precompute lands will see no rec
-    // and bail, instead of redrawing run-N-1 data on top of run-N state.
     recRef.current = null;
     frameRef.current = 0;
     renderer.reset();
 
-    const cLeft = viewport.w / 2 - containerSize.w / 2;
-    const cTop = viewport.h / 2 - containerSize.h / 2;
+    const { left: cLeft, top: cTop } = containerOrigin;
 
-    // Visual handover: nuke the previous image's particles immediately and
-    // show a faint, pulsing preview of the new source image while the
-    // worker chews. Without this the old image lingers on the canvas for
-    // the entire precompute window.
     renderer.clearParticles();
     renderSource();
     renderer.showLoading(sourceCanvasRef.current!, containerSize, cLeft, cTop);
@@ -186,8 +176,6 @@ export default function App() {
     w.onmessage = (e: MessageEvent<WorkerMessage>) => {
       const msg = e.data;
       if (msg.type === "ready") return;
-      // Drop any message whose seed isn't the most recently requested one.
-      // This is the "stale precompute" guard described above latestSeedRef.
       if ("seed" in msg && msg.seed !== latestSeedRef.current) return;
       if (msg.type === "progress") {
         setProgress(msg.pct / 100);
@@ -205,7 +193,6 @@ export default function App() {
         };
         setHasCache(true);
         renderSource();
-        // Tear down the pulsing loading preview before particles appear.
         renderer.reset();
         const c = renderer.bake(
           msg.recX, msg.recY, msg.scale, msg.N, msg.TOTAL,
@@ -232,24 +219,19 @@ export default function App() {
         RESTITUTION: params.RESTITUTION,
         BALL_FRICTION: params.BALL_FRICTION,
         GRAVITY: params.GRAVITY,
-        holes: holes.map((h) => ({ ...h })),
+        holes,
         containerW: containerSize.w,
         containerH: containerSize.h,
       },
       viewport: { W: viewport.w, H: viewport.h },
     });
-  }, [renderer, viewport, params, holes, containerSize, derived, renderSource, tick]);
+  }, [renderer, viewport, params, holes, containerSize, containerOrigin, derived, renderSource, tick]);
 
-  // Cancel an in-flight precompute. The worker runs synchronously inside
-  // its own thread so we can't preempt it with a flag — we terminate the
-  // whole worker and spawn a fresh one. Latest-seed bump also drops any
-  // residual messages from the dying worker before it goes away.
+  // Worker is single-threaded synchronous, so we terminate + respawn to
+  // actually stop a precompute mid-flight.
   const cancelRun = useCallback(() => {
-    const w = workerRef.current;
-    if (w) w.terminate();
-    workerRef.current = new Worker(new URL("./worker.js", import.meta.url), {
-      type: "module",
-    });
+    workerRef.current?.terminate();
+    workerRef.current = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
     latestSeedRef.current = -1;
     setProgress(0);
     renderer.reset();
@@ -257,17 +239,12 @@ export default function App() {
     recRef.current = null;
     frameRef.current = 0;
     setPhase(hasCache ? "settled" : "idle");
-    // Stay dirty so the user knows there's a pending recompute waiting.
     dirtyRef.current = true;
     setDirty(true);
   }, [renderer, hasCache]);
 
-  // Pure cache playback. Never triggers precompute. Available whenever a
-  // cached recording exists — even mid-precompute (you'll be re-watching
-  // the previous run).
   const replay = useCallback(() => {
-    const rec = recRef.current;
-    if (!rec) return;
+    if (!recRef.current) return;
     setShowSource(false);
     renderer.reset();
     playingRef.current = false;
@@ -285,16 +262,15 @@ export default function App() {
       renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, rec.total - 1);
       setShowSource(false);
     } else {
-      const cLeft = viewport.w / 2 - containerSize.w / 2;
-      const cTop = viewport.h / 2 - containerSize.h / 2;
-      renderer.fadeInDom(sourceCanvasRef.current!, containerSize, cLeft, cTop, () => {
+      const { left, top } = containerOrigin;
+      renderer.fadeInDom(sourceCanvasRef.current!, containerSize, left, top, () => {
         renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, rec.total - 1);
       });
       setShowSource(true);
     }
-  }, [renderer, showSource, viewport, containerSize]);
+  }, [renderer, showSource, containerSize, containerOrigin]);
 
-  // First run.
+  // First run on mount.
   useEffect(() => {
     let cancelled = false;
     (async () => {
@@ -314,25 +290,23 @@ export default function App() {
     if (Math.abs(ar - imgAR) > 0.001) {
       setImgAR(ar);
       markDirty();
-    } else {
-      // Same AR — re-bake colors against existing record without dirtying.
-      renderSource();
-      const rec = recRef.current;
-      if (rec) {
-        const cLeft = viewport.w / 2 - containerSize.w / 2;
-        const cTop = viewport.h / 2 - containerSize.h / 2;
-        const c = renderer.bake(
-          rec.recX, rec.recY, rec.scale, rec.N, rec.total,
-          sourceCanvasRef.current!, containerSize, cLeft, cTop, derived.ballRadius,
-        );
-        setColored(c);
-        const f = playingRef.current
-          ? frameRef.current
-          : Math.max(0, Math.min(frameRef.current, rec.total - 1));
-        renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, f);
-      }
+      return;
     }
-  }, [renderer, viewport.w, viewport.h, derived.ballRadius, renderSource, imgAR, containerSize]);
+    // Same AR — re-bake colors in place against the existing record.
+    renderSource();
+    const rec = recRef.current;
+    if (!rec) return;
+    const { left, top } = containerOrigin;
+    const c = renderer.bake(
+      rec.recX, rec.recY, rec.scale, rec.N, rec.total,
+      sourceCanvasRef.current!, containerSize, left, top, derived.ballRadius,
+    );
+    setColored(c);
+    const f = playingRef.current
+      ? frameRef.current
+      : Math.max(0, Math.min(frameRef.current, rec.total - 1));
+    renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, f);
+  }, [renderer, derived.ballRadius, renderSource, imgAR, containerSize, containerOrigin]);
 
   const lastARRef = useRef(imgAR);
   useEffect(() => {
@@ -352,29 +326,38 @@ export default function App() {
     markDirty();
   }, []);
 
+  // Bind global keydown once and read latest handlers/state via refs so the
+  // listener doesn't tear down + re-bind on every keystroke or slider drag.
+  const newRunRef = useRef(newRun);
+  const replayRef = useRef(replay);
+  const cancelRef = useRef(cancelRun);
+  const stateRef = useRef({ phase, holes, selectedHole, setHolesUpdating, setSelectedHole });
+  useEffect(() => {
+    newRunRef.current = newRun;
+    replayRef.current = replay;
+    cancelRef.current = cancelRun;
+    stateRef.current = { phase, holes, selectedHole, setHolesUpdating, setSelectedHole };
+  });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
-      if (e.key === "r") replay();
-      if (e.key === "Enter" && dirtyRef.current && phase !== "precomputing") newRun();
-      if (e.key === "Escape" && phase === "precomputing") cancelRun();
-      if ((e.key === "Backspace" || e.key === "Delete") && selectedHole >= 0 && holes.length > 1) {
-        setHolesUpdating(holes.filter((_, i) => i !== selectedHole));
-        setSelectedHole(-1);
+      const s = stateRef.current;
+      if (e.key === "r") replayRef.current();
+      if (e.key === "Enter" && dirtyRef.current && s.phase !== "precomputing") newRunRef.current();
+      if (e.key === "Escape" && s.phase === "precomputing") cancelRef.current();
+      if ((e.key === "Backspace" || e.key === "Delete") && s.selectedHole >= 0 && s.holes.length > 1) {
+        s.setHolesUpdating(s.holes.filter((_, i) => i !== s.selectedHole));
+        s.setSelectedHole(-1);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [replay, newRun, cancelRun, holes, selectedHole, setHolesUpdating, phase]);
+  }, []);
 
   const addHole = () => {
     const sides = ["bottom", "top", "left", "right"] as const;
-    const next = sides[holes.length % sides.length];
-    setHolesUpdating([
-      ...holes,
-      { side: next, offset: 0.5, width: HOLE_DEFAULT_WIDTH, angle: 0, speed: HOLE_DEFAULT_SPEED, cone: HOLE_DEFAULT_CONE },
-    ]);
+    setHolesUpdating([...holes, makeHole(sides[holes.length % sides.length])]);
     setSelectedHole(holes.length);
   };
 
@@ -387,36 +370,24 @@ export default function App() {
     setHolesUpdating(holes.filter((_, i) => i !== selectedHole));
     setSelectedHole(-1);
   };
-  const mirrorSelectedH = () => {
+  const mirrorSelected = (fn: (h: Hole) => Hole) => () => {
     if (selectedHole < 0) return;
-    const m = mirrorHFn(holes[selectedHole]);
-    setHolesUpdating([...holes, m]);
-    setSelectedHole(holes.length);
-  };
-  const mirrorSelectedV = () => {
-    if (selectedHole < 0) return;
-    const m = mirrorVFn(holes[selectedHole]);
-    setHolesUpdating([...holes, m]);
+    setHolesUpdating([...holes, fn(holes[selectedHole])]);
     setSelectedHole(holes.length);
   };
 
-  function phaseToLabel(): string {
-    switch (phase) {
-      case "precomputing": return "computing";
-      case "fountaining":  return "falling";
-      case "settled":      return "ready";
-      case "error":        return "error";
-      case "loading":      return "loading";
-      default:             return "idle";
-    }
-  }
-  const phaseLabel = phaseToLabel();
+  const phaseLabel = (
+    phase === "precomputing" ? "computing" :
+    phase === "fountaining" ? "falling" :
+    phase === "settled" ? "ready" :
+    phase
+  );
 
-  function statusDotClass(): string {
-    if (phase === "settled") return "bg-foreground/80";
-    if (phase === "error") return "bg-destructive";
-    return "bg-foreground/60 animate-pulse";
-  }
+  const statusDot = (
+    phase === "settled" ? "bg-foreground/80" :
+    phase === "error" ? "bg-destructive" :
+    "bg-foreground/60 animate-pulse"
+  );
 
   const canReplay = hasCache;
   const canNewRun = dirty || phase === "loading" || phase === "error";
@@ -425,8 +396,6 @@ export default function App() {
     <TooltipProvider delayDuration={150}>
       <canvas ref={canvasRef} className="fixed inset-0 z-0" />
 
-      {/* Soft warm vignette around the canvas — wallpaper feel. Derives from
-          --primary so the glow tints with the accent in either theme. */}
       <div
         aria-hidden
         className="pointer-events-none fixed inset-0 z-[1] bg-[radial-gradient(80%_60%_at_50%_0%,hsl(var(--primary)/0.10),transparent_70%),radial-gradient(80%_60%_at_50%_100%,hsl(var(--primary)/0.14),transparent_70%)]"
@@ -441,22 +410,22 @@ export default function App() {
         onSelect={setSelectedHole}
       />
 
-      {/* LEFT — Scene. Full-height, flush left, hairline border on inner edge. */}
-      <aside className="fixed inset-y-0 left-0 z-10 flex w-[300px] flex-col overflow-hidden border-r border-border/60 glass warm-vignette">
+      <aside
+        className="fixed inset-y-0 left-0 z-10 flex flex-col overflow-hidden border-r border-border/60 glass warm-vignette"
+        style={{ width: LEFT_PANEL_W }}
+      >
         <header className="flex items-baseline justify-between border-b border-border/60 px-4 py-3.5">
           <h3 className="display text-[22px] leading-none">
             reveal<span className="display-italic text-primary">.</span>
           </h3>
-          <span className="display-italic text-[13px] text-muted-foreground/70">
-            scene
-          </span>
+          <span className="display-italic text-[13px] text-muted-foreground/70">scene</span>
         </header>
         <div className="flex-1 space-y-6 overflow-y-auto px-4 pb-5 pt-4">
           <section>
             <div className="mb-2.5">
               <InfoLabel
                 tip="The picture you want the settled balls to recreate. Each ball samples a pixel color at its final resting position."
-                className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70"
+                className={SECTION_LABEL}
               >
                 Source
               </InfoLabel>
@@ -467,7 +436,7 @@ export default function App() {
             <div className="mb-2.5">
               <InfoLabel
                 tip="Bundles ball radius, emission rate, and settle time into one knob. Total ball count is auto-sized to fill the container at the chosen density."
-                className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70"
+                className={SECTION_LABEL}
               >
                 Quality
               </InfoLabel>
@@ -481,8 +450,10 @@ export default function App() {
         </div>
       </aside>
 
-      {/* RIGHT — Physics. Full-height, flush right, hairline border on inner edge. */}
-      <aside className="fixed inset-y-0 right-0 z-10 flex w-[320px] flex-col overflow-hidden border-l border-border/60 glass warm-vignette">
+      <aside
+        className="fixed inset-y-0 right-0 z-10 flex flex-col overflow-hidden border-l border-border/60 glass warm-vignette"
+        style={{ width: RIGHT_PANEL_W }}
+      >
         <header className="flex items-center justify-between border-b border-border/60 px-4 py-3.5">
           <h3 className="display text-[22px] leading-none">physics</h3>
           <button
@@ -497,12 +468,13 @@ export default function App() {
         </header>
 
         <div className="flex-1 space-y-6 overflow-y-auto px-4 pb-5 pt-4">
-          {/* FEEL first — fixed-height section, never shifts when holes change. */}
+          {/* Feel above Holes — Holes is variable-height, putting it last
+              keeps the slider section anchored when holes are added/edited. */}
           <section>
             <div className="mb-2.5">
               <InfoLabel
                 tip="The three sliders that change how the simulation feels. Tooltips on each label explain what they do."
-                className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70"
+                className={SECTION_LABEL}
               >
                 Feel
               </InfoLabel>
@@ -533,12 +505,11 @@ export default function App() {
             />
           </section>
 
-          {/* HOLES second — variable-height (list grows, editor toggles). */}
           <section>
             <div className="mb-2.5 flex items-baseline justify-between">
               <InfoLabel
                 tip="Spots on the container walls where balls erupt from. Drag the handle on the canvas to move; drag the rotation grip to aim. Right-click a hole to delete."
-                className="text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70"
+                className={SECTION_LABEL}
               >
                 Holes
               </InfoLabel>
@@ -561,14 +532,13 @@ export default function App() {
                 onChange={updateSelectedHole}
                 onDelete={deleteSelectedHole}
                 onDeselect={() => setSelectedHole(-1)}
-                onMirrorH={mirrorSelectedH}
-                onMirrorV={mirrorSelectedV}
+                onMirrorH={mirrorSelected(mirrorHFn)}
+                onMirrorV={mirrorSelected(mirrorVFn)}
               />
             )}
           </section>
         </div>
 
-        {/* Footer — auxiliary metadata (container size). */}
         <footer className="border-t border-border/60 px-4 py-2.5">
           <div className="flex items-center justify-between text-[10.5px] text-muted-foreground/60">
             <span className="display-italic">container</span>
@@ -579,27 +549,16 @@ export default function App() {
         </footer>
       </aside>
 
-      {/* BOTTOM — phase-aware dock. Content adapts so it never feels half-
-          empty: precompute mode shows a live progress bar + Cancel button;
-          play/settled mode shows status + secondary actions + the primary
-          Reveal CTA. */}
       <div
         className="pointer-events-none fixed bottom-5 z-[4] flex items-center justify-center"
-        style={{ left: 300, right: 320 }}
+        style={{ left: LEFT_PANEL_W, right: RIGHT_PANEL_W }}
       >
         {phase === "precomputing" ? (
-          // ── Computing state — progress + Cancel ─────────────────────────
           <div className="pointer-events-auto relative flex h-11 items-stretch overflow-hidden rounded-full glass">
             <div className="flex items-center gap-3 pl-4 pr-3 text-[12px]">
               <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" />
-              <span className="font-medium tracking-tight text-foreground/90">
-                computing
-              </span>
-              {/* Inline live progress bar — fills as the worker reports back. */}
-              <span
-                aria-hidden
-                className="relative ml-1 h-[5px] w-[140px] overflow-hidden rounded-full bg-foreground/[0.08]"
-              >
+              <span className="font-medium tracking-tight text-foreground/90">computing</span>
+              <span aria-hidden className="relative ml-1 h-[5px] w-[140px] overflow-hidden rounded-full bg-foreground/[0.08]">
                 <span
                   className="absolute inset-y-0 left-0 origin-left rounded-full bg-primary transition-transform duration-200 ease-fluid"
                   style={{ width: "100%", transform: `scaleX(${progress})` }}
@@ -622,13 +581,10 @@ export default function App() {
             </button>
           </div>
         ) : (
-          // ── Idle / falling / settled — status + actions + Reveal ────────
           <div className="pointer-events-auto relative flex h-11 items-stretch overflow-hidden rounded-full glass">
             <div className="flex items-center gap-2 px-4 text-[12px] tabular-nums">
-              <span className={cn("size-2 shrink-0 rounded-full transition-colors", statusDotClass())} />
-              <span className="font-medium tracking-tight text-foreground/90">
-                {phaseLabel}
-              </span>
+              <span className={cn("size-2 shrink-0 rounded-full transition-colors", statusDot)} />
+              <span className="font-medium tracking-tight text-foreground/90">{phaseLabel}</span>
               <span className="text-muted-foreground/40">·</span>
               <span className="text-muted-foreground/80">
                 <b className="font-medium text-foreground/90">{colored.toLocaleString()}</b>
@@ -663,17 +619,12 @@ export default function App() {
             <button
               onClick={newRun}
               disabled={!canNewRun}
-              title={
-                !canNewRun
-                  ? "Nothing has changed since the last run."
-                  : "Re-run physics with the current parameters."
-              }
+              title={canNewRun ? "Re-run physics with the current parameters." : "Nothing has changed since the last run."}
               className={cn(
-                "flex w-[140px] items-center justify-center gap-2 text-[13px] font-medium tracking-tight transition-colors",
+                "flex w-[140px] items-center justify-center gap-2 text-[13px] font-medium tracking-tight transition-colors disabled:pointer-events-none",
                 canNewRun
                   ? "bg-primary text-primary-foreground hover:bg-primary/90"
                   : "bg-foreground/[0.05] text-muted-foreground/70",
-                "disabled:pointer-events-none",
               )}
             >
               <span>Reveal</span>
@@ -691,7 +642,7 @@ export default function App() {
   );
 }
 
-function sourceButtonTitle(phase: string, showSource: boolean): string {
+function sourceButtonTitle(phase: Phase, showSource: boolean): string {
   if (phase !== "settled") return "Available once balls have settled.";
   return showSource ? "Hide the source image overlay." : "Overlay the source image for comparison.";
 }
@@ -709,10 +660,7 @@ function BigSlider({
   return (
     <div className="py-1.5">
       <div className="mb-1 flex items-baseline justify-between">
-        <InfoLabel
-          tip={tip}
-          className="text-[10px] uppercase tracking-[0.10em] text-muted-foreground/70"
-        >
+        <InfoLabel tip={tip} className="text-[10px] uppercase tracking-[0.10em] text-muted-foreground/70">
           {label}
         </InfoLabel>
         <span className="mono text-[10px] tabular-nums text-muted-foreground">

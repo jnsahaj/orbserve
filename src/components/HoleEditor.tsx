@@ -3,7 +3,8 @@ import {
   type Hole,
   type HoleSide,
   type ContainerSize,
-  baseAnglesByside,
+  baseAnglesBySide,
+  makeHole,
 } from "@/lib/types";
 
 interface Props {
@@ -65,16 +66,18 @@ export function HoleEditor({
 }: Props) {
   const dragRef = useRef<{ kind: "move" | "rotate"; idx: number } | null>(null);
 
-  // Latest props as refs so the global pointer listener always sees fresh data
-  // without re-binding (which would lose the dragRef state).
+  // Read latest props inside the global pointer listener via refs so the
+  // listener doesn't re-bind on every render (which would drop the drag).
   const holesRef = useRef(holes);
   const viewportRef = useRef(viewport);
   const containerRef = useRef(container);
   const onChangeRef = useRef(onChange);
-  holesRef.current = holes;
-  viewportRef.current = viewport;
-  containerRef.current = container;
-  onChangeRef.current = onChange;
+  useEffect(() => {
+    holesRef.current = holes;
+    viewportRef.current = viewport;
+    containerRef.current = container;
+    onChangeRef.current = onChange;
+  });
 
   useEffect(() => {
     const handleMove = (e: PointerEvent) => {
@@ -95,7 +98,7 @@ export function HoleEditor({
       } else {
         const h = hs[drag.idx];
         const c = holeCenter(h, b);
-        let rel = (Math.atan2(e.clientY - c.y, e.clientX - c.x) - baseAnglesByside[h.side]) * 180 / Math.PI;
+        let rel = (Math.atan2(e.clientY - c.y, e.clientX - c.x) - baseAnglesBySide[h.side]) * 180 / Math.PI;
         while (rel > 180) rel -= 360;
         while (rel < -180) rel += 360;
         rel = clamp(rel, -90, 90);
@@ -116,7 +119,7 @@ export function HoleEditor({
 
   const onEdgeClick = (side: HoleSide, e: React.MouseEvent) => {
     const off = projectOffset(side, e.clientX, e.clientY, b);
-    onChange([...holes, { side, offset: snap(off, e.shiftKey), width: 100, angle: 0 }]);
+    onChange([...holes, { ...makeHole(side), offset: snap(off, e.shiftKey) }]);
     onSelect(holes.length);
   };
   const onContextMenu = (idx: number, e: React.MouseEvent) => {
@@ -133,7 +136,6 @@ export function HoleEditor({
       height={viewport.h}
       className="pointer-events-none fixed inset-0 z-[5]"
     >
-      {/* Container outline */}
       <rect
         x={b.left} y={b.top}
         width={b.width} height={b.height}
@@ -142,7 +144,7 @@ export function HoleEditor({
         strokeWidth={1}
         strokeDasharray="4 5"
       />
-      {/* Edge hit zones — click to add hole */}
+      {/* Edge hit zones — click to add a hole on that edge. */}
       {([
         ["bottom", b.left, b.top + b.height, b.left + b.width, b.top + b.height],
         ["top",    b.left, b.top,            b.left + b.width, b.top],
@@ -159,12 +161,11 @@ export function HoleEditor({
           onClick={(e) => onEdgeClick(side, e)}
         />
       ))}
-      {/* Holes */}
       {holes.map((h, idx) => {
         const c = holeCenter(h, b);
         const tang = holeTangent(h);
         const tangAngleDeg = Math.atan2(tang.y, tang.x) * 180 / Math.PI;
-        const launchAngle = baseAnglesByside[h.side] + (h.angle || 0) * Math.PI / 180;
+        const launchAngle = baseAnglesBySide[h.side] + (h.angle || 0) * Math.PI / 180;
         const dir = { x: Math.cos(launchAngle), y: Math.sin(launchAngle) };
         const arrowLen = 38;
         const ax = c.x + dir.x * arrowLen;

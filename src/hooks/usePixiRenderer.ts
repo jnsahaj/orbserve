@@ -1,4 +1,4 @@
-import { useEffect, useRef } from "react";
+import { useEffect, useMemo, useRef } from "react";
 import {
   Application,
   ParticleContainer,
@@ -15,9 +15,8 @@ interface RendererState {
   particleContainer: ParticleContainer;
   circleTexture: Texture;
   pixiParticles: (Particle | null)[];
-  visible: Uint8Array;
   domSprite: Sprite | null;
-  loadingTickerId: number | null;   // RAF id of the active loading-pulse loop
+  loadingTickerId: number | null;
 }
 
 export interface RendererHandle {
@@ -34,13 +33,7 @@ export interface RendererHandle {
     containerTop: number,
     ballRadius: number,
   ) => number;
-  drawFrame: (
-    recX: Uint16Array,
-    recY: Uint16Array,
-    scale: number,
-    N: number,
-    f: number,
-  ) => void;
+  drawFrame: (recX: Uint16Array, recY: Uint16Array, scale: number, N: number, f: number) => void;
   fadeInDom: (
     sourceCanvas: HTMLCanvasElement,
     container: ContainerSize,
@@ -48,11 +41,7 @@ export interface RendererHandle {
     containerTop: number,
     drawLastFrame: () => void,
   ) => void;
-  /** Wipe every particle currently on stage. Used at run start so the
-      previous run's image doesn't linger during the new precompute. */
   clearParticles: () => void;
-  /** Show a faint, gently-pulsing copy of the source image on the stage as
-      a "we're working on it" indicator. Stays up until reset() is called. */
   showLoading: (
     sourceCanvas: HTMLCanvasElement,
     container: ContainerSize,
@@ -60,6 +49,13 @@ export interface RendererHandle {
     containerTop: number,
   ) => void;
   reset: () => void;
+}
+
+function placeSprite(s: Sprite, container: ContainerSize, x: number, y: number) {
+  s.x = x;
+  s.y = y;
+  s.width = container.w;
+  s.height = container.h;
 }
 
 export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): RendererHandle {
@@ -76,8 +72,7 @@ export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): 
       await app.init({
         canvas,
         resizeTo: window,
-        // Transparent so the theme-driven body background shows through —
-        // light mode reveals cream paper, dark mode reveals warm-black.
+        // Transparent so the body's theme background shows through.
         backgroundAlpha: 0,
         antialias: false,
         autoDensity: true,
@@ -106,33 +101,33 @@ export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): 
         particleContainer,
         circleTexture,
         pixiParticles: [],
-        visible: new Uint8Array(0),
         domSprite: null,
         loadingTickerId: null,
       };
     })();
+    // No cleanup: this hook owns the singleton WebGL/WebGPU app for the
+    // lifetime of the page. Destroying it under StrictMode's double-mount
+    // races the in-flight init promise and leaves stateRef pointing at a
+    // dead Application.
   }, [canvasRef]);
 
-  return {
+  // Stable handle so consumers' `useCallback`s with `renderer` in deps don't
+  // re-fire every render. Methods only read stateRef.current, so [] is safe.
+  return useMemo<RendererHandle>(() => ({
     ready: () => readyRef.current ?? Promise.resolve(),
 
     bake(recX, recY, scale, N, total, sourceCanvas, container, cLeft, cTop, ballRadius) {
       const s = stateRef.current;
       if (!s) return 0;
       const { particleContainer, circleTexture } = s;
-      const ctx = sourceCanvas.getContext("2d")!;
-      const data = ctx.getImageData(0, 0, container.w, container.h).data;
+      const data = sourceCanvas.getContext("2d")!.getImageData(0, 0, container.w, container.h).data;
 
-      // Always start from a clean slate. Reusing particles between runs is
-      // an attractive nuisance — old tints and stale positions can leak
-      // between runs in subtle ways, and have caused "scrambled final
-      // image" bugs after parameter tweaks. Worth the small cost of
-      // re-allocating N Pixi particles per run.
+      // Reallocate every run. Reusing particles between runs has bitten us
+      // with stale tints / positions producing scrambled images.
       for (const p of s.pixiParticles) if (p) particleContainer.removeParticle(p);
-      const particles = new Array(N).fill(null);
-      const visible = new Uint8Array(N);
+      const particles: (Particle | null)[] = new Array(N).fill(null);
       s.pixiParticles = particles;
-      s.visible = visible;
+
       const lastOff = (total - 1) * N;
       const radiusScale = (ballRadius * 2) / CIRCLE_TEX_SIZE;
       let colored = 0;
@@ -140,46 +135,24 @@ export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): 
         const qx = recX[lastOff + i];
         const qy = recY[lastOff + i];
         if (qx === 0 && qy === 0) continue;
-        const x = qx / scale;
-        const y = qy / scale;
-        const ix = (x - cLeft) | 0;
-        const iy = (y - cTop) | 0;
+        const ix = ((qx / scale) - cLeft) | 0;
+        const iy = ((qy / scale) - cTop) | 0;
         if (ix < 0 || ix >= container.w || iy < 0 || iy >= container.h) continue;
         const pi = (iy * container.w + ix) * 4;
         if (data[pi + 3] < 32) continue;
-        const r = data[pi], g = data[pi + 1], b = data[pi + 2];
-        let p = particles[i];
-        if (!p) {
-          p = new Particle({
-            texture: circleTexture,
-            x: -9999, y: -9999,
-            scaleX: radiusScale,
-            scaleY: radiusScale,
-            anchorX: 0.5,
-            anchorY: 0.5,
-            tint: (r << 16) | (g << 8) | b,
-          });
-          particleContainer.addParticle(p);
-          particles[i] = p;
-        } else {
-          p.tint = (r << 16) | (g << 8) | b;
-          p.scaleX = p.scaleY = radiusScale;
-        }
-        visible[i] = 1;
+        const tint = (data[pi] << 16) | (data[pi + 1] << 8) | data[pi + 2];
+        const p = new Particle({
+          texture: circleTexture,
+          x: -9999, y: -9999,
+          scaleX: radiusScale,
+          scaleY: radiusScale,
+          anchorX: 0.5,
+          anchorY: 0.5,
+          tint,
+        });
+        particleContainer.addParticle(p);
+        particles[i] = p;
         colored++;
-      }
-      for (let i = 0; i < N; i++) {
-        if (!visible[i] && particles[i]) {
-          particleContainer.removeParticle(particles[i]!);
-          particles[i] = null;
-        }
-      }
-      // Park every particle off-screen so that, between bake and the first
-      // drawFrame call, the renderer doesn't briefly composite particles at
-      // wherever they happened to be from the previous run's last frame.
-      for (let i = 0; i < N; i++) {
-        const p = particles[i];
-        if (p) { p.x = -9999; p.y = -9999; }
       }
       return colored;
     },
@@ -210,23 +183,19 @@ export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): 
       if (!s) return;
       if (s.domSprite) {
         s.app.stage.removeChild(s.domSprite);
-        s.domSprite.destroy();
+        s.domSprite.destroy({ texture: true });
       }
       const tex = Texture.from(sourceCanvas);
       tex.source.update?.();
       const sprite = new Sprite(tex);
-      sprite.x = cLeft;
-      sprite.y = cTop;
-      sprite.width = container.w;
-      sprite.height = container.h;
+      placeSprite(sprite, container, cLeft, cTop);
       sprite.alpha = 0;
       s.app.stage.addChild(sprite);
       s.domSprite = sprite;
 
       let alpha = 0;
       const tick = () => {
-        alpha += 0.05;
-        if (alpha > 1) alpha = 1;
+        alpha = Math.min(1, alpha + 0.05);
         sprite.alpha = alpha;
         drawLast();
         if (alpha < 1) requestAnimationFrame(tick);
@@ -237,50 +206,36 @@ export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): 
     clearParticles() {
       const s = stateRef.current;
       if (!s) return;
-      const { particleContainer, pixiParticles } = s;
-      for (const p of pixiParticles) if (p) particleContainer.removeParticle(p);
+      for (const p of s.pixiParticles) if (p) s.particleContainer.removeParticle(p);
       s.pixiParticles = [];
-      s.visible = new Uint8Array(0);
-      // Force one render so the canvas immediately shows nothing — without
-      // this the prior frame stays on screen until the next drawFrame call,
-      // which can be seconds away while a precompute is running.
+      // Force a render so the canvas blanks immediately rather than waiting
+      // on the next drawFrame (which can be seconds away during precompute).
       s.app.renderer.render(s.app.stage);
     },
 
     showLoading(sourceCanvas, container, cLeft, cTop) {
       const s = stateRef.current;
       if (!s) return;
-      // Tear down anything we previously had up.
-      if (s.loadingTickerId != null) {
-        cancelAnimationFrame(s.loadingTickerId);
-        s.loadingTickerId = null;
-      }
+      if (s.loadingTickerId != null) cancelAnimationFrame(s.loadingTickerId);
       if (s.domSprite) {
         s.app.stage.removeChild(s.domSprite);
-        s.domSprite.destroy();
-        s.domSprite = null;
+        s.domSprite.destroy({ texture: true });
       }
       const tex = Texture.from(sourceCanvas);
       tex.source.update?.();
       const sprite = new Sprite(tex);
-      sprite.x = cLeft;
-      sprite.y = cTop;
-      sprite.width = container.w;
-      sprite.height = container.h;
+      placeSprite(sprite, container, cLeft, cTop);
       sprite.alpha = 0;
       s.app.stage.addChild(sprite);
       s.domSprite = sprite;
 
-      // Pulse: fade in to 0.18, breathe between 0.10 and 0.22, fast easing.
-      // Reads as "the system is alive and chewing on this image" without
-      // ever distracting from the eventual reveal.
       const t0 = performance.now();
       const tick = () => {
         const cur = stateRef.current;
         if (!cur || cur.domSprite !== sprite) return;
         const t = (performance.now() - t0) / 1000;
-        const ease = Math.min(1, t / 0.4);                     // 400ms fade-in
-        const breath = 0.16 + 0.06 * Math.sin(t * 2.4);        // gentle pulse
+        const ease = Math.min(1, t / 0.4);
+        const breath = 0.16 + 0.06 * Math.sin(t * 2.4);
         sprite.alpha = ease * breath;
         cur.app.renderer.render(cur.app.stage);
         cur.loadingTickerId = requestAnimationFrame(tick);
@@ -297,9 +252,9 @@ export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): 
       }
       if (s.domSprite) {
         s.app.stage.removeChild(s.domSprite);
-        s.domSprite.destroy();
+        s.domSprite.destroy({ texture: true });
         s.domSprite = null;
       }
     },
-  };
+  }), []);
 }
