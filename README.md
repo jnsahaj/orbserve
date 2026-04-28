@@ -19,11 +19,8 @@ npm run build
 
 ## Tech
 
-- [React](https://react.dev/) and [Vite](https://vite.dev/) for the app shell and build tooling.
 - [Rapier](https://rapier.rs/) for the 2D physics simulation.
 - [PixiJS](https://pixijs.com/) for fast canvas/WebGL rendering.
-- [Zustand](https://zustand.docs.pmnd.rs/) for local state.
-- [Tailwind CSS](https://tailwindcss.com/) and [Radix UI](https://www.radix-ui.com/) primitives for the interface.
 
 ## Note
 
