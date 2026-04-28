@@ -47,7 +47,7 @@ export function HoleInlineEditor() {
       <div className="flex flex-col gap-2 px-2.5 py-2.5">
         <SliderRow
           label="offset"
-          tip="Position along the wall. 0 = top/left edge, 100 = bottom/right edge."
+          tip="Moves this hole along its wall."
           value={hole.offset * 100}
           min={0} max={100} step={1}
           format={(v) => `${Math.round(v)}%`}
@@ -55,7 +55,7 @@ export function HoleInlineEditor() {
         />
         <SliderRow
           label="width"
-          tip="Lateral spread of the spawn zone. Wider holes emit balls across a longer band of the wall."
+          tip="Sets how wide the opening is. Wider openings make a broader stream."
           value={hole.width}
           min={20} max={600} step={4}
           format={(v) => `${Math.round(v)}px`}
@@ -63,7 +63,7 @@ export function HoleInlineEditor() {
         />
         <SliderRow
           label="angle"
-          tip="Tilts the launch direction off the inward normal. 0° = straight in; ±90° = parallel to the wall."
+          tip="Aims the stream left or right from the wall."
           value={hole.angle}
           min={-90} max={90} step={1}
           format={(v) => `${Math.round(v)}°`}
@@ -71,7 +71,7 @@ export function HoleInlineEditor() {
         />
         <SliderRow
           label="speed"
-          tip="Initial launch speed of balls leaving this hole, in pixels per frame. Higher = balls fly farther before gravity overcomes them."
+          tip="Sets how forcefully balls leave this hole."
           value={speed}
           min={2} max={60} step={1}
           format={(v) => `${Math.round(v)}`}
@@ -79,7 +79,7 @@ export function HoleInlineEditor() {
         />
         <SliderRow
           label="cone"
-          tip="Random angular spread on each launch, in radians. 0 = perfectly straight stream; 2.5 ≈ full half-circle fan."
+          tip="Adds spread to the stream. Low values make a tight beam; high values make a fan."
           value={cone}
           min={0} max={2.5} step={0.05}
           format={(v) => v.toFixed(2)}
@@ -90,14 +90,14 @@ export function HoleInlineEditor() {
         <div className="flex items-center gap-1">
           <button
             onClick={() => mirrorHole(index, "h")}
-            title="Duplicate this hole, mirrored across the vertical axis"
+            title="Copy to the opposite side"
             className="grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <FlipHorizontal2 className="size-3.5" strokeWidth={1.8} />
           </button>
           <button
             onClick={() => mirrorHole(index, "v")}
-            title="Duplicate this hole, mirrored across the horizontal axis"
+            title="Copy above or below"
             className="grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <FlipVertical2 className="size-3.5" strokeWidth={1.8} />

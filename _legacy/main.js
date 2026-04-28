@@ -1,5 +1,5 @@
 // ──────────────────────────────────────────────────────────────────────────
-// Reveal — physics-fountain image-reveal playground
+// Orbserve — physics-fountain image simulator
 //
 // Pieces:
 //   · Image source: file upload OR a built-in sample (text/emoji rendered
@@ -94,7 +94,7 @@ srcCanvas.height = SRC_H;
 const srcCtx = srcCanvas.getContext("2d", { willReadFrequently: true });
 
 const SAMPLES = {
-  reveal: (ctx) => {
+  orbserve: (ctx) => {
     ctx.fillStyle = "#06070d";
     ctx.fillRect(0, 0, SRC_W, SRC_H);
     const grad = ctx.createLinearGradient(0, 0, SRC_W, 0);
@@ -106,7 +106,7 @@ const SAMPLES = {
     ctx.font = "900 168px -apple-system, system-ui, sans-serif";
     ctx.textAlign = "center";
     ctx.textBaseline = "middle";
-    ctx.fillText("REVEAL", SRC_W / 2, SRC_H / 2);
+    ctx.fillText("ORBSERVE", SRC_W / 2, SRC_H / 2);
   },
   heart:  (ctx) => emojiSample(ctx, "❤️"),
   star:   (ctx) => emojiSample(ctx, "⭐"),
@@ -135,7 +135,7 @@ function makeUploadDrawer(img) {
   };
 }
 
-let currentDrawer = SAMPLES.reveal;
+let currentDrawer = SAMPLES.orbserve;
 function renderSource() {
   srcCtx.clearRect(0, 0, SRC_W, SRC_H);
   currentDrawer(srcCtx);
@@ -158,7 +158,7 @@ picker.querySelectorAll(".img-btn[data-sample]").forEach((btn) => {
   });
 });
 // Default selection
-picker.querySelector('[data-sample="reveal"]').classList.add("selected");
+picker.querySelector('[data-sample="orbserve"]').classList.add("selected");
 
 document.getElementById("img-upload").addEventListener("change", (e) => {
   const file = e.target.files?.[0];
@@ -330,13 +330,13 @@ function loop() {
   frameIdx++;
   if (frameIdx >= recTotal) {
     playing = false;
-    finalizeReveal();
+    finalizeComposite();
     return;
   }
   requestAnimationFrame(loop);
 }
 
-function finalizeReveal() {
+function finalizeComposite() {
   phaseEl.textContent = "settled";
   if (domSprite) {
     app.stage.removeChild(domSprite);

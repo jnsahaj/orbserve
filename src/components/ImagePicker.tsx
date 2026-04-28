@@ -137,7 +137,6 @@ export function ImagePicker({ onSelect }: Props) {
                 ? "border-foreground ring-2 ring-foreground/15 ring-offset-2 ring-offset-card"
                 : "border-border/60 hover:border-foreground/40",
             )}
-            title={key}
           >
             <SampleThumb draw={sample.draw} />
           </button>

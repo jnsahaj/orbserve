@@ -9,7 +9,7 @@ export interface UploadEntry {
   createdAt: number;
 }
 
-const DB_NAME = "reveal";
+const DB_NAME = "orbserve";
 const STORE = "uploads";
 
 let dbPromise: Promise<IDBPDatabase> | null = null;

@@ -346,7 +346,7 @@ export default function App() {
     const a = document.createElement("a");
     a.href = url;
     const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
-    a.download = `reveal-${ts}.${ext}`;
+    a.download = `orbserve-${ts}.${ext}`;
     document.body.appendChild(a);
     a.click();
     document.body.removeChild(a);
@@ -538,7 +538,7 @@ export default function App() {
           those controls live in the right panel header on desktop. */}
       <header className="pointer-events-none fixed left-3 right-3 top-3 z-[4] flex items-center justify-between md:hidden">
         <h1 className="display pointer-events-auto text-[20px] leading-none">
-          reveal<span className="display-italic text-primary">.</span>
+          <BrandWord />
         </h1>
         <div className="pointer-events-auto flex items-center gap-1.5">
           <button
@@ -568,7 +568,7 @@ export default function App() {
       >
         <header className="flex items-baseline justify-between border-b border-border/60 px-4 py-3.5">
           <h3 className="display text-[22px] leading-none">
-            reveal<span className="display-italic text-primary">.</span>
+            <BrandWord />
           </h3>
           <span className="display-italic text-[13px] text-muted-foreground/70">scene</span>
         </header>
@@ -588,7 +588,7 @@ export default function App() {
               type="button"
               onClick={handleReset}
               aria-label="Reset to defaults"
-              title="Reset params, holes, and source to defaults"
+              title="Reset the scene"
               className="grid size-7 place-items-center rounded-md border border-border/60 bg-card/60 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
             >
               <RotateCcw className="size-3.5" />
@@ -676,7 +676,7 @@ export default function App() {
 
             <button
               onClick={cancelRun}
-              title="Cancel this precompute (Esc)"
+              title="Stop this run"
               className="flex items-center gap-1.5 px-4 text-[12.5px] font-medium tracking-tight text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
             >
               <X className="size-3.5" strokeWidth={2} />
@@ -688,7 +688,7 @@ export default function App() {
             <button
               onClick={replay}
               disabled={!canReplay}
-              title="Replay the last run from cache"
+              title="Play again"
               className="grid w-10 place-items-center text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
             >
               <Play className="size-4" strokeWidth={1.8} />
@@ -707,7 +707,7 @@ export default function App() {
             <button
               onClick={exportVideo}
               disabled={!canExport}
-              title={exporting ? `Exporting… ${Math.round(exportProgress * 100)}%` : "Export simulation as a video (.mp4 / .webm)"}
+              title={exporting ? `Exporting... ${Math.round(exportProgress * 100)}%` : "Save as video"}
               className={cn(
                 "grid w-10 place-items-center transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
                 exporting ? "text-foreground/90" : "text-muted-foreground",
@@ -723,7 +723,7 @@ export default function App() {
             <button
               onClick={newRun}
               disabled={!canNewRun}
-              title={canNewRun ? "Re-run physics with the current parameters." : "Nothing has changed since the last run."}
+              title={canNewRun ? "Run with the latest changes." : "You're already viewing the latest run."}
               className={cn(
                 "flex w-[110px] items-center justify-center gap-2 text-[13px] font-medium tracking-tight transition-colors disabled:pointer-events-none md:w-[140px]",
                 canNewRun
@@ -731,7 +731,7 @@ export default function App() {
                   : "bg-foreground/[0.05] text-muted-foreground/70",
               )}
             >
-              <span>Reveal</span>
+              <span>Run</span>
               <kbd className={cn(
                 "hidden rounded px-1.5 py-0.5 text-[10px] mono md:inline-block",
                 canNewRun
@@ -756,24 +756,29 @@ export default function App() {
   );
 }
 
+function BrandWord() {
+  return (
+    <>
+      <span className="text-primary/90">orb</span>
+      <span>serve</span>
+      <span className="display-italic text-primary">.</span>
+    </>
+  );
+}
+
 function SceneSections({ onImageSelect }: { onImageSelect: (key: string, drawer: Drawer, ar: number) => void }) {
   return (
     <>
       <section>
         <div className="mb-2.5">
-          <InfoLabel
-            tip="The picture you want the settled balls to recreate. Each ball samples a pixel color at its final resting position."
-            className={SECTION_LABEL}
-          >
-            Source
-          </InfoLabel>
+          <span className={SECTION_LABEL}>Source</span>
         </div>
         <ImagePicker onSelect={onImageSelect} />
       </section>
       <section>
         <div className="mb-2.5">
           <InfoLabel
-            tip="Bundles ball radius, emission rate, and settle time into one knob. Total ball count is auto-sized to fill the container at the chosen density."
+            tip="Choose how detailed the final image should be. Higher quality uses more balls and takes longer to run."
             className={SECTION_LABEL}
           >
             Quality
@@ -784,7 +789,7 @@ function SceneSections({ onImageSelect }: { onImageSelect: (key: string, drawer:
       <section>
         <div className="mb-2.5">
           <InfoLabel
-            tip="Curated scenes that show what's possible — load one and tweak from there."
+            tip="Start with a ready-made motion setup, then adjust it however you like."
             className={SECTION_LABEL}
           >
             Presets
@@ -810,24 +815,19 @@ function PhysicsSections({
           keeps the slider section anchored when holes are added/edited. */}
       <section>
         <div className="mb-2.5">
-          <InfoLabel
-            tip="Sliders that change how the simulation feels — restitution and friction shape the physics, speed only affects playback."
-            className={SECTION_LABEL}
-          >
-            Feel
-          </InfoLabel>
+          <span className={SECTION_LABEL}>Feel</span>
         </div>
         <BigSlider
-          label="restitution"
-          tip="Bounciness of ball-on-ball and ball-on-wall collisions. 0 = clay (no bounce, balls stick where they land — best for crisp lattices); 1 = perfect rebound."
+          label="bounce"
+          tip="Controls how much the balls rebound after hitting each other. Lower values settle faster; higher values feel livelier."
           value={params.RESTITUTION}
           min={0} max={1} step={0.02}
           format={(v) => v.toFixed(2)}
           onChange={(v) => setParam("RESTITUTION", v)}
         />
         <BigSlider
-          label="friction"
-          tip="Coulomb friction at every contact. 0 = ice (piles slump); 1 = sandpaper (lattice grains lock in place and grain boundaries persist)."
+          label="grip"
+          tip="Controls how much the balls hold their place as they pile up. Lower values slide around more; higher values lock into place."
           value={params.BALL_FRICTION}
           min={0} max={1} step={0.02}
           format={(v) => v.toFixed(2)}
@@ -835,7 +835,7 @@ function PhysicsSections({
         />
         <BigSlider
           label="speed"
-          tip="Playback speed of the cached animation — doesn't affect the precompute, only how fast frames play. Smooth at any value thanks to interframe interpolation."
+          tip="Controls how fast the finished animation plays back. It does not change where the balls land."
           value={playSpeed}
           min={0.25} max={4} step={0.25}
           format={(v) => `${v.toFixed(2)}×`}
@@ -854,7 +854,7 @@ function HolesSection() {
     <section>
       <div className="mb-2.5 flex items-baseline justify-between">
         <InfoLabel
-          tip="Spots on the container walls where balls erupt from. Drag the handle on the canvas to move; drag the rotation grip to aim. Right-click a hole to delete."
+          tip="Choose where balls enter the canvas. Select one to edit it, or drag its handle directly on the image."
           className={SECTION_LABEL}
         >
           Holes
@@ -879,8 +879,8 @@ function loadImage(src: string): Promise<HTMLImageElement> {
 }
 
 function sourceButtonTitle(phase: Phase, showSource: boolean): string {
-  if (phase !== "settled") return "Available once balls have settled.";
-  return showSource ? "Hide the source image overlay." : "Overlay the source image for comparison.";
+  if (phase !== "settled") return "Available after the run finishes.";
+  return showSource ? "Hide the original image." : "Show the original image for comparison.";
 }
 
 function BigSlider({

@@ -141,7 +141,7 @@ export const useSettingsStore = create<SettingsState>()(
       },
     }),
     {
-      name: "reveal:settings",
+      name: "orbserve:settings",
       version: 3,
       migrate: (persistedState, version) => {
         const s = persistedState as Partial<SettingsState> | undefined;
@@ -162,9 +162,9 @@ export const useSettingsStore = create<SettingsState>()(
         // v2 → v3: gravity removed. Strip the field so future writes don't
         // resurrect it via spread.
         if (version < 3 && s?.params) {
-          const p = { ...(s.params as Record<string, unknown>) };
+          const p = { ...(s.params as unknown as Record<string, unknown>) };
           delete p.GRAVITY;
-          s.params = p as SimParams;
+          s.params = p as unknown as SimParams;
         }
         return s as SettingsState;
       },

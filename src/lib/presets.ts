@@ -12,7 +12,7 @@ export interface ScenePreset {
 export const FOUNTAIN_PRESET: ScenePreset = {
   id: "fountain",
   label: "Fountain",
-  description: "Gentle bottom jet — the default, easy starter.",
+  description: "A gentle stream from the bottom. A good place to start.",
   params: { RESTITUTION: 0.4, BALL_FRICTION: 0.1 },
   holes: [
     { side: "bottom", offset: 0.5, width: 40, angle: 0, speed: 22, cone: 0.15 },
@@ -24,7 +24,7 @@ export const PRESETS: ScenePreset[] = [
   {
     id: "vortex",
     label: "Vortex",
-    description: "Four tangential jets — clockwise swirl that knits a spiral.",
+    description: "Four angled streams that swirl into a spiral.",
     params: { RESTITUTION: 0.3, BALL_FRICTION: 0.15 },
     holes: [
       { side: "top",    offset: 0.5, width: 30, angle: 60, speed: 16, cone: 0 },
@@ -36,7 +36,7 @@ export const PRESETS: ScenePreset[] = [
   {
     id: "lattice",
     label: "Lattice",
-    description: "No bounce, max friction — opposing jets crystallize into a grid.",
+    description: "Two steady side streams that settle into a clean grid.",
     params: { RESTITUTION: 0, BALL_FRICTION: 1 },
     holes: [
       { side: "left",  offset: 0.5, width: 30, angle: 0, speed: 14, cone: 0 },
@@ -46,7 +46,7 @@ export const PRESETS: ScenePreset[] = [
   {
     id: "crossfire",
     label: "Crossfire",
-    description: "Four perpendicular beams meeting head-on at center.",
+    description: "Four streams meet in the center for a balanced burst.",
     params: { RESTITUTION: 0.4, BALL_FRICTION: 0.1 },
     holes: [
       { side: "bottom", offset: 0.5, width: 35, angle: 0, speed: 16, cone: 0.1 },
@@ -58,7 +58,7 @@ export const PRESETS: ScenePreset[] = [
   {
     id: "chevron",
     label: "Chevron",
-    description: "Two angled jets crossing into an X above center.",
+    description: "Two bottom streams cross into an X shape.",
     params: { RESTITUTION: 0.3, BALL_FRICTION: 0.15 },
     holes: [
       { side: "bottom", offset: 0.3, width: 35, angle: 30,  speed: 18, cone: 0.05 },
@@ -68,7 +68,7 @@ export const PRESETS: ScenePreset[] = [
   {
     id: "confetti",
     label: "Confetti",
-    description: "Eight wide-cone sprays — soft volumetric fill.",
+    description: "Many soft sprays fill the canvas from every side.",
     params: { RESTITUTION: 0.55, BALL_FRICTION: 0.1 },
     holes: [
       { side: "bottom", offset: 0.25, width: 25, angle: 0, speed: 9, cone: 1.4 },
@@ -84,7 +84,7 @@ export const PRESETS: ScenePreset[] = [
   {
     id: "pulse",
     label: "Pulse",
-    description: "Single ultra-narrow high-speed beam from below.",
+    description: "A fast, narrow stream shoots up from the bottom.",
     params: { RESTITUTION: 0.6, BALL_FRICTION: 0.08 },
     holes: [
       { side: "bottom", offset: 0.5, width: 22, angle: 0, speed: 45, cone: 0 },
