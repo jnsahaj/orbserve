@@ -26,7 +26,7 @@ import { cn } from "@/lib/utils";
 const DEFAULT_PARAMS: SimParams = {
   QUALITY: "medium",
   RESTITUTION: 0.08,
-  BALL_FRICTION: 0.55,
+  BALL_FRICTION: 0,
   GRAVITY: 0,
 };
 

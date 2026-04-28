@@ -23,10 +23,10 @@ export interface QualityPreset {
 }
 
 export const QUALITY_PRESETS: Record<Quality, QualityPreset> = {
-  low:    { label: "Low",    ballRadius: 11, fillRatio: 0.65, ballsPerFrame: 4,  settleFrames: 160 },
-  medium: { label: "Medium", ballRadius: 7,  fillRatio: 0.72, ballsPerFrame: 5,  settleFrames: 200 },
-  high:   { label: "High",   ballRadius: 5,  fillRatio: 0.78, ballsPerFrame: 8,  settleFrames: 240 },
-  ultra:  { label: "Ultra",  ballRadius: 3,  fillRatio: 0.83, ballsPerFrame: 14, settleFrames: 280 },
+  low:    { label: "Low",    ballRadius: 11, fillRatio: 0.72, ballsPerFrame: 4,  settleFrames: 160 },
+  medium: { label: "Medium", ballRadius: 7,  fillRatio: 0.80, ballsPerFrame: 5,  settleFrames: 200 },
+  high:   { label: "High",   ballRadius: 5,  fillRatio: 0.86, ballsPerFrame: 8,  settleFrames: 240 },
+  ultra:  { label: "Ultra",  ballRadius: 3,  fillRatio: 0.90, ballsPerFrame: 14, settleFrames: 280 },
 };
 
 export interface ContainerSize { w: number; h: number }
