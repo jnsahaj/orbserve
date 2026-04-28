@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, Moon, Play, Sun } from "lucide-react";
+import { Eye, EyeOff, Moon, Play, Sun, X } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Slider } from "@/components/ui/slider";
 import { ImagePicker } from "@/components/ImagePicker";
@@ -240,6 +240,28 @@ export default function App() {
     });
   }, [renderer, viewport, params, holes, containerSize, derived, renderSource, tick]);
 
+  // Cancel an in-flight precompute. The worker runs synchronously inside
+  // its own thread so we can't preempt it with a flag — we terminate the
+  // whole worker and spawn a fresh one. Latest-seed bump also drops any
+  // residual messages from the dying worker before it goes away.
+  const cancelRun = useCallback(() => {
+    const w = workerRef.current;
+    if (w) w.terminate();
+    workerRef.current = new Worker(new URL("./worker.js", import.meta.url), {
+      type: "module",
+    });
+    latestSeedRef.current = -1;
+    setProgress(0);
+    renderer.reset();
+    playingRef.current = false;
+    recRef.current = null;
+    frameRef.current = 0;
+    setPhase(hasCache ? "settled" : "idle");
+    // Stay dirty so the user knows there's a pending recompute waiting.
+    dirtyRef.current = true;
+    setDirty(true);
+  }, [renderer, hasCache]);
+
   // Pure cache playback. Never triggers precompute. Available whenever a
   // cached recording exists — even mid-precompute (you'll be re-watching
   // the previous run).
@@ -336,6 +358,7 @@ export default function App() {
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
       if (e.key === "r") replay();
       if (e.key === "Enter" && dirtyRef.current && phase !== "precomputing") newRun();
+      if (e.key === "Escape" && phase === "precomputing") cancelRun();
       if ((e.key === "Backspace" || e.key === "Delete") && selectedHole >= 0 && holes.length > 1) {
         setHolesUpdating(holes.filter((_, i) => i !== selectedHole));
         setSelectedHole(-1);
@@ -343,7 +366,7 @@ export default function App() {
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
-  }, [replay, newRun, holes, selectedHole, setHolesUpdating, phase]);
+  }, [replay, newRun, cancelRun, holes, selectedHole, setHolesUpdating, phase]);
 
   const addHole = () => {
     const sides = ["bottom", "top", "left", "right"] as const;
@@ -556,86 +579,113 @@ export default function App() {
         </footer>
       </aside>
 
-      {/* BOTTOM — two-pill dock: a status pill and a beefier action pill
-          containing both secondary icon actions and the primary CTA. Each
-          pill has fixed-width sub-columns so dynamic text never shifts the
-          layout. */}
+      {/* BOTTOM — phase-aware dock. Content adapts so it never feels half-
+          empty: precompute mode shows a live progress bar + Cancel button;
+          play/settled mode shows status + secondary actions + the primary
+          Reveal CTA. */}
       <div
-        className="pointer-events-none fixed bottom-5 z-[4] flex items-center justify-center gap-2.5"
+        className="pointer-events-none fixed bottom-5 z-[4] flex items-center justify-center"
         style={{ left: 300, right: 320 }}
       >
-        {/* Status pill — fixed width, phase + count, progress underline. */}
-        <div className="pointer-events-auto relative grid h-11 w-[230px] grid-cols-[14px_1fr_8px_auto] items-center gap-2 overflow-hidden rounded-full glass px-4 text-[12px] tabular-nums">
-          <span className={cn("size-2 rounded-full transition-colors", statusDotClass())} />
-          <span className="font-medium tracking-tight text-foreground/90">
-            {phaseLabel}
-          </span>
-          <span className="text-muted-foreground/40">·</span>
-          <span className="text-right text-muted-foreground/80">
-            <b className="font-medium text-foreground/90">{colored.toLocaleString()}</b>
-            <span className="ml-1">balls</span>
-          </span>
-          {/* Progress line */}
-          <span
-            aria-hidden
-            className={cn(
-              "pointer-events-none absolute bottom-0 left-0 col-span-full h-[2px] origin-left bg-primary",
-              "transition-[transform,opacity] duration-200 ease-fluid",
-              phase === "precomputing" ? "opacity-100" : "opacity-0",
-            )}
-            style={{ width: "100%", transform: `scaleX(${progress})` }}
-          />
-        </div>
+        {phase === "precomputing" ? (
+          // ── Computing state — progress + Cancel ─────────────────────────
+          <div className="pointer-events-auto relative flex h-11 items-stretch overflow-hidden rounded-full glass">
+            <div className="flex items-center gap-3 pl-4 pr-3 text-[12px]">
+              <span className="size-2 shrink-0 animate-pulse rounded-full bg-primary" />
+              <span className="font-medium tracking-tight text-foreground/90">
+                computing
+              </span>
+              {/* Inline live progress bar — fills as the worker reports back. */}
+              <span
+                aria-hidden
+                className="relative ml-1 h-[5px] w-[140px] overflow-hidden rounded-full bg-foreground/[0.08]"
+              >
+                <span
+                  className="absolute inset-y-0 left-0 origin-left rounded-full bg-primary transition-transform duration-200 ease-fluid"
+                  style={{ width: "100%", transform: `scaleX(${progress})` }}
+                />
+              </span>
+              <span className="mono w-9 tabular-nums text-right text-[11px] text-muted-foreground/80">
+                {Math.round(progress * 100)}%
+              </span>
+            </div>
 
-        {/* Action pill — secondary icons + primary CTA, all in one piece. */}
-        <div className="pointer-events-auto flex h-11 items-stretch overflow-hidden rounded-full glass">
-          <button
-            onClick={replay}
-            disabled={!canReplay}
-            title="Replay the last run from cache"
-            className="grid w-10 place-items-center text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
-          >
-            <Play className="size-4" strokeWidth={1.8} />
-          </button>
-          <button
-            onClick={toggleSource}
-            disabled={phase !== "settled"}
-            title={sourceButtonTitle(phase, showSource)}
-            className={cn(
-              "grid w-10 place-items-center transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
-              showSource ? "bg-foreground/[0.08] text-foreground" : "text-muted-foreground",
-            )}
-          >
-            {showSource ? <EyeOff className="size-4" strokeWidth={1.8} /> : <Eye className="size-4" strokeWidth={1.8} />}
-          </button>
+            <div className="my-2 w-px bg-border/60" />
 
-          <div className="my-2 w-px bg-border/60" />
+            <button
+              onClick={cancelRun}
+              title="Cancel this precompute (Esc)"
+              className="flex items-center gap-1.5 px-4 text-[12.5px] font-medium tracking-tight text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground"
+            >
+              <X className="size-3.5" strokeWidth={2} />
+              <span>Cancel</span>
+            </button>
+          </div>
+        ) : (
+          // ── Idle / falling / settled — status + actions + Reveal ────────
+          <div className="pointer-events-auto relative flex h-11 items-stretch overflow-hidden rounded-full glass">
+            <div className="flex items-center gap-2 px-4 text-[12px] tabular-nums">
+              <span className={cn("size-2 shrink-0 rounded-full transition-colors", statusDotClass())} />
+              <span className="font-medium tracking-tight text-foreground/90">
+                {phaseLabel}
+              </span>
+              <span className="text-muted-foreground/40">·</span>
+              <span className="text-muted-foreground/80">
+                <b className="font-medium text-foreground/90">{colored.toLocaleString()}</b>
+                <span className="ml-1">balls</span>
+              </span>
+            </div>
 
-          <button
-            onClick={newRun}
-            disabled={!canNewRun || phase === "precomputing"}
-            title={
-              !canNewRun
-                ? "Nothing has changed since the last run."
-                : "Re-run physics with the current parameters."
-            }
-            className={cn(
-              "flex w-[140px] items-center justify-center gap-2 text-[13px] font-medium tracking-tight transition-colors",
-              canNewRun && phase !== "precomputing"
-                ? "bg-primary text-primary-foreground hover:bg-primary/90"
-                : "bg-foreground/[0.05] text-muted-foreground/70",
-              "disabled:pointer-events-none",
-            )}
-          >
-            <span>Reveal</span>
-            <kbd className={cn(
-              "rounded px-1.5 py-0.5 text-[10px] mono",
-              canNewRun && phase !== "precomputing"
-                ? "bg-primary-foreground/15 text-primary-foreground/80"
-                : "bg-foreground/[0.06] text-muted-foreground/60",
-            )}>⏎</kbd>
-          </button>
-        </div>
+            <div className="my-2 w-px bg-border/60" />
+
+            <button
+              onClick={replay}
+              disabled={!canReplay}
+              title="Replay the last run from cache"
+              className="grid w-10 place-items-center text-muted-foreground transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-40"
+            >
+              <Play className="size-4" strokeWidth={1.8} />
+            </button>
+            <button
+              onClick={toggleSource}
+              disabled={phase !== "settled"}
+              title={sourceButtonTitle(phase, showSource)}
+              className={cn(
+                "grid w-10 place-items-center transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
+                showSource ? "bg-foreground/[0.08] text-foreground" : "text-muted-foreground",
+              )}
+            >
+              {showSource ? <EyeOff className="size-4" strokeWidth={1.8} /> : <Eye className="size-4" strokeWidth={1.8} />}
+            </button>
+
+            <div className="my-2 w-px bg-border/60" />
+
+            <button
+              onClick={newRun}
+              disabled={!canNewRun}
+              title={
+                !canNewRun
+                  ? "Nothing has changed since the last run."
+                  : "Re-run physics with the current parameters."
+              }
+              className={cn(
+                "flex w-[140px] items-center justify-center gap-2 text-[13px] font-medium tracking-tight transition-colors",
+                canNewRun
+                  ? "bg-primary text-primary-foreground hover:bg-primary/90"
+                  : "bg-foreground/[0.05] text-muted-foreground/70",
+                "disabled:pointer-events-none",
+              )}
+            >
+              <span>Reveal</span>
+              <kbd className={cn(
+                "rounded px-1.5 py-0.5 text-[10px] mono",
+                canNewRun
+                  ? "bg-primary-foreground/15 text-primary-foreground/80"
+                  : "bg-foreground/[0.06] text-muted-foreground/60",
+              )}>⏎</kbd>
+            </button>
+          </div>
+        )}
       </div>
     </TooltipProvider>
   );
