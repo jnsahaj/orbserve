@@ -305,6 +305,10 @@ export default function App() {
     recorder.start();
 
     const pixiCanvas = canvasRef.current!;
+    // Export honors the user's playSpeed: < 1 = longer/slower video, > 1 =
+    // shorter/faster. The output is recorded at rAF cadence (~60fps) so the
+    // duration scales as rec.total / playSpeed seconds.
+    const playSpeed = useSettingsStore.getState().playSpeed;
     let frame = 0;
     const tickExport = () => {
       if (frame >= rec.total) {
@@ -312,8 +316,8 @@ export default function App() {
         track.stop();
         return;
       }
-      // Always export at 1× regardless of the user's playSpeed.
-      renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, frame);
+      const f = Math.min(frame, rec.total - 1);
+      renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, f);
       ctx.fillStyle = "#000";
       ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
       // Copy the container region from the PIXI canvas in the same task as
@@ -325,8 +329,8 @@ export default function App() {
         0, 0, exportCanvas.width, exportCanvas.height,
       );
       track.requestFrame();
-      frame++;
-      setExportProgress(frame / rec.total);
+      frame += playSpeed;
+      setExportProgress(Math.min(1, frame / rec.total));
       requestAnimationFrame(tickExport);
     };
     requestAnimationFrame(tickExport);
