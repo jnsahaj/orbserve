@@ -4,17 +4,10 @@ import {
   type HoleSide,
   type ContainerSize,
   baseAnglesBySide,
-  makeHole,
+  containerForAR,
 } from "@/lib/types";
-
-interface Props {
-  holes: Hole[];
-  selected: number;
-  viewport: { w: number; h: number };
-  container: ContainerSize;
-  onChange: (next: Hole[]) => void;
-  onSelect: (idx: number) => void;
-}
+import { useSettingsStore } from "@/stores/useSettingsStore";
+import { useSimStore } from "@/stores/useSimStore";
 
 interface Bounds { left: number; top: number; width: number; height: number }
 
@@ -61,40 +54,32 @@ function snap(v: number, free: boolean) {
   return free ? v : Math.round(v * 20) / 20;
 }
 
-export function HoleEditor({
-  holes, selected, viewport, container, onChange, onSelect,
-}: Props) {
-  const dragRef = useRef<{ kind: "move" | "rotate"; idx: number } | null>(null);
+export function HoleEditor() {
+  const holes = useSettingsStore((s) => s.holes);
+  const addHoleOnSide = useSettingsStore((s) => s.addHoleOnSide);
+  const removeHole = useSettingsStore((s) => s.removeHole);
+  const selected = useSimStore((s) => s.selectedHole);
+  const setSelected = useSimStore((s) => s.setSelectedHole);
+  const viewport = useSimStore((s) => s.viewport);
+  const imgAR = useSimStore((s) => s.imgAR);
+  const container = containerForAR(imgAR, viewport);
 
-  // Read latest props inside the global pointer listener via refs so the
-  // listener doesn't re-bind on every render (which would drop the drag).
-  const holesRef = useRef(holes);
-  const viewportRef = useRef(viewport);
-  const containerRef = useRef(container);
-  const onChangeRef = useRef(onChange);
-  useEffect(() => {
-    holesRef.current = holes;
-    viewportRef.current = viewport;
-    containerRef.current = container;
-    onChangeRef.current = onChange;
-  });
+  const dragRef = useRef<{ kind: "move" | "rotate"; idx: number } | null>(null);
 
   useEffect(() => {
     const handleMove = (e: PointerEvent) => {
       const drag = dragRef.current;
       if (!drag) return;
-      const b = makeBounds(viewportRef.current, containerRef.current);
-      const hs = holesRef.current;
+      const sim = useSimStore.getState();
+      const { holes: hs } = useSettingsStore.getState();
+      const b = makeBounds(sim.viewport, containerForAR(sim.imgAR, sim.viewport));
       if (drag.kind === "move") {
         const side = nearestSide(e.clientX, e.clientY, b);
         const off = projectOffset(side, e.clientX, e.clientY, b);
-        onChangeRef.current(
-          hs.map((h, i) =>
-            i === drag.idx
-              ? { ...h, side, offset: snap(clamp(off, 0, 1), e.shiftKey) }
-              : h,
-          ),
-        );
+        useSettingsStore.getState().setHoleAt(drag.idx, {
+          side,
+          offset: snap(clamp(off, 0, 1), e.shiftKey),
+        });
       } else {
         const h = hs[drag.idx];
         const c = holeCenter(h, b);
@@ -103,7 +88,7 @@ export function HoleEditor({
         while (rel < -180) rel += 360;
         rel = clamp(rel, -90, 90);
         if (!e.shiftKey) rel = Math.round(rel / 5) * 5;
-        onChangeRef.current(hs.map((hh, i) => (i === drag.idx ? { ...hh, angle: rel } : hh)));
+        useSettingsStore.getState().setHoleAt(drag.idx, { angle: rel });
       }
     };
     const handleUp = () => { dragRef.current = null; };
@@ -119,14 +104,11 @@ export function HoleEditor({
 
   const onEdgeClick = (side: HoleSide, e: React.MouseEvent) => {
     const off = projectOffset(side, e.clientX, e.clientY, b);
-    onChange([...holes, { ...makeHole(side), offset: snap(off, e.shiftKey) }]);
-    onSelect(holes.length);
+    addHoleOnSide(side, snap(off, e.shiftKey));
   };
   const onContextMenu = (idx: number, e: React.MouseEvent) => {
     e.preventDefault();
-    if (holes.length === 1) return;
-    onChange(holes.filter((_, i) => i !== idx));
-    onSelect(-1);
+    removeHole(idx);
   };
 
   return (
@@ -179,13 +161,22 @@ export function HoleEditor({
           <g
             key={idx}
             className="pointer-events-auto cursor-grab active:cursor-grabbing"
+            style={{ touchAction: "none" }}
             onPointerDown={(e) => {
               e.preventDefault();
               dragRef.current = { kind: "move", idx };
-              onSelect(idx);
+              setSelected(idx);
             }}
             onContextMenu={(e) => onContextMenu(idx, e)}
           >
+            {/* Touch hit-pad on the drag handle (invisible, ~22px tall) */}
+            <rect
+              x={-Math.max(h.width, 44) / 2} y={-11}
+              width={Math.max(h.width, 44)} height={22}
+              rx={4}
+              fill="transparent"
+              transform={`translate(${c.x},${c.y}) rotate(${tangAngleDeg})`}
+            />
             <rect
               x={-h.width / 2} y={-4}
               width={h.width} height={8}
@@ -193,6 +184,7 @@ export function HoleEditor({
               fill={fill} stroke={stroke}
               strokeWidth={1.25}
               transform={`translate(${c.x},${c.y}) rotate(${tangAngleDeg})`}
+              style={{ pointerEvents: "none" }}
             />
             <line
               x1={c.x} y1={c.y} x2={ax} y2={ay}
@@ -205,19 +197,25 @@ export function HoleEditor({
               fill={stroke}
               style={{ pointerEvents: "none" }}
             />
+            {/* Larger transparent hit-pad for the rotation grip (~24px radius) */}
+            <circle
+              cx={ax} cy={ay} r={16}
+              fill="transparent"
+              className="cursor-alias"
+              style={{ pointerEvents: "auto", touchAction: "none" }}
+              onPointerDown={(e) => {
+                e.preventDefault();
+                e.stopPropagation();
+                dragRef.current = { kind: "rotate", idx };
+                setSelected(idx);
+              }}
+            />
             <circle
               cx={ax} cy={ay} r={6}
               fill="rgba(0,0,0,1)"
               stroke={stroke}
               strokeWidth={1.5}
-              className="cursor-alias"
-              style={{ pointerEvents: "auto" }}
-              onPointerDown={(e) => {
-                e.preventDefault();
-                e.stopPropagation();
-                dragRef.current = { kind: "rotate", idx };
-                onSelect(idx);
-              }}
+              style={{ pointerEvents: "none" }}
             />
           </g>
         );

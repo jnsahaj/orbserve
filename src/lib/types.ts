@@ -32,7 +32,7 @@ export type Phase =
   | "settled"
   | "error";
 
-export type Quality = "low" | "medium" | "high" | "ultra";
+export type Quality = "medium" | "high" | "ultra";
 
 export interface QualityPreset {
   label: string;
@@ -43,10 +43,9 @@ export interface QualityPreset {
 }
 
 export const QUALITY_PRESETS: Record<Quality, QualityPreset> = {
-  low:    { label: "Low",    ballRadius: 11, fillRatio: 0.72, ballsPerFrame: 4,  settleFrames: 160 },
-  medium: { label: "Medium", ballRadius: 7,  fillRatio: 0.80, ballsPerFrame: 5,  settleFrames: 200 },
-  high:   { label: "High",   ballRadius: 5,  fillRatio: 0.86, ballsPerFrame: 8,  settleFrames: 240 },
-  ultra:  { label: "Ultra",  ballRadius: 3,  fillRatio: 0.90, ballsPerFrame: 14, settleFrames: 280 },
+  medium: { label: "Medium", ballRadius: 7,  fillRatio: 0.88, ballsPerFrame: 6,  settleFrames: 220 },
+  high:   { label: "High",   ballRadius: 5,  fillRatio: 0.90, ballsPerFrame: 8,  settleFrames: 240 },
+  ultra:  { label: "Ultra",  ballRadius: 3,  fillRatio: 0.92, ballsPerFrame: 14, settleFrames: 280 },
 };
 
 export interface ContainerSize { w: number; h: number }
@@ -76,17 +75,25 @@ export interface SimParams {
   QUALITY: Quality;
   RESTITUTION: number;
   BALL_FRICTION: number;
-  GRAVITY: number;
 }
 
 export const MAX_CONTAINER_W = 720;
 export const MAX_CONTAINER_H = 480;
+const MOBILE_BREAKPOINT = 768;
 
-export function containerForAR(ar: number): ContainerSize {
-  if (ar > MAX_CONTAINER_W / MAX_CONTAINER_H) {
-    return { w: MAX_CONTAINER_W, h: Math.round(MAX_CONTAINER_W / ar) };
+export function containerForAR(ar: number, vp?: { w: number; h: number }): ContainerSize {
+  let maxW = MAX_CONTAINER_W;
+  let maxH = MAX_CONTAINER_H;
+  if (vp && vp.w < MOBILE_BREAKPOINT) {
+    // On phones, leave room for the top bar (~56px) and bottom controls (~80px)
+    // plus a margin so the container doesn't kiss the edges.
+    maxW = Math.max(160, Math.min(MAX_CONTAINER_W, vp.w - 24));
+    maxH = Math.max(120, Math.min(MAX_CONTAINER_H, vp.h - 200));
   }
-  return { w: Math.round(MAX_CONTAINER_H * ar), h: MAX_CONTAINER_H };
+  if (ar > maxW / maxH) {
+    return { w: maxW, h: Math.round(maxW / ar) };
+  }
+  return { w: Math.round(maxH * ar), h: maxH };
 }
 
 export interface PrecomputeMessage {

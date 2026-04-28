@@ -1,14 +1,8 @@
 import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
-import { type Hole, type HoleSide } from "@/lib/types";
-
-interface Props {
-  holes: Hole[];
-  selected: number;
-  onChange: (next: Hole[]) => void;
-  onSelect: (idx: number) => void;
-  onAdd: () => void;
-}
+import { type HoleSide } from "@/lib/types";
+import { useSettingsStore } from "@/stores/useSettingsStore";
+import { useSimStore } from "@/stores/useSimStore";
 
 const SIDE_ICON: Record<HoleSide, typeof ArrowDown> = {
   bottom: ArrowDown,
@@ -17,8 +11,15 @@ const SIDE_ICON: Record<HoleSide, typeof ArrowDown> = {
   right:  ArrowRight,
 };
 
-export function HolesPanel({ holes, selected, onChange, onSelect, onAdd }: Props) {
+export function HolesPanel() {
+  const holes = useSettingsStore((s) => s.holes);
+  const addHole = useSettingsStore((s) => s.addHole);
+  const removeHole = useSettingsStore((s) => s.removeHole);
+  const selected = useSimStore((s) => s.selectedHole);
+  const setSelected = useSimStore((s) => s.setSelectedHole);
+
   const canDelete = holes.length > 1;
+
   return (
     <div>
       <ul className="overflow-hidden rounded-lg border border-border/60 bg-foreground/[0.025]">
@@ -34,7 +35,7 @@ export function HolesPanel({ holes, selected, onChange, onSelect, onAdd }: Props
               )}
             >
               <button
-                onClick={() => onSelect(isSel ? -1 : i)}
+                onClick={() => setSelected(isSel ? -1 : i)}
                 className="flex flex-1 items-center gap-2.5 text-left"
               >
                 <span
@@ -65,12 +66,7 @@ export function HolesPanel({ holes, selected, onChange, onSelect, onAdd }: Props
                 </span>
               </button>
               <button
-                onClick={() => {
-                  if (!canDelete) return;
-                  onChange(holes.filter((_, j) => j !== i));
-                  if (selected === i) onSelect(-1);
-                  else if (selected > i) onSelect(selected - 1);
-                }}
+                onClick={() => removeHole(i)}
                 disabled={!canDelete}
                 title={canDelete ? "Remove hole" : "At least one hole is required"}
                 className="grid size-6 place-items-center rounded-md text-muted-foreground/0 transition-colors hover:bg-destructive/10 hover:text-destructive disabled:hidden group-hover:text-muted-foreground/70"
@@ -83,7 +79,7 @@ export function HolesPanel({ holes, selected, onChange, onSelect, onAdd }: Props
       </ul>
 
       <button
-        onClick={onAdd}
+        onClick={addHole}
         className="mt-2 flex w-full items-center justify-center gap-1.5 rounded-md border border-dashed border-border/70 px-2 py-1.5 text-[11.5px] font-medium text-muted-foreground transition-colors hover:border-foreground/40 hover:text-foreground"
       >
         <Plus className="size-3.5" strokeWidth={2} />

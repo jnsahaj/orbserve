@@ -7,25 +7,26 @@ import {
   HOLE_DEFAULT_SPEED,
   HOLE_DEFAULT_CONE,
 } from "@/lib/types";
-
-interface Props {
-  hole: Hole;
-  index: number;
-  totalHoles: number;
-  onChange: (patch: Partial<Hole>) => void;
-  onDelete: () => void;
-  onDeselect: () => void;
-  onMirrorH: () => void;
-  onMirrorV: () => void;
-}
+import { useSettingsStore } from "@/stores/useSettingsStore";
+import { useSimStore } from "@/stores/useSimStore";
 
 const ROW_LABEL_CLASS = "text-[10px] uppercase tracking-wider text-muted-foreground/70";
 
-export function HoleInlineEditor({
-  hole, index, totalHoles, onChange, onDelete, onDeselect, onMirrorH, onMirrorV,
-}: Props) {
+export function HoleInlineEditor() {
+  const index = useSimStore((s) => s.selectedHole);
+  const setSelected = useSimStore((s) => s.setSelectedHole);
+  const hole = useSettingsStore((s) => (index >= 0 ? s.holes[index] : undefined));
+  const totalHoles = useSettingsStore((s) => s.holes.length);
+  const setHoleAt = useSettingsStore((s) => s.setHoleAt);
+  const removeHole = useSettingsStore((s) => s.removeHole);
+  const mirrorHole = useSettingsStore((s) => s.mirrorHole);
+
+  if (index < 0 || !hole) return null;
+
   const speed = hole.speed ?? HOLE_DEFAULT_SPEED;
   const cone = hole.cone ?? HOLE_DEFAULT_CONE;
+
+  const update = (patch: Partial<Hole>) => setHoleAt(index, patch);
 
   return (
     <div className="animate-popover-in mt-3 overflow-hidden rounded-lg border border-border/60 bg-foreground/[0.04]">
@@ -36,7 +37,7 @@ export function HoleInlineEditor({
           <span className="font-normal text-muted-foreground/70">· {hole.side}</span>
         </span>
         <button
-          onClick={onDeselect}
+          onClick={() => setSelected(-1)}
           className="flex size-5 items-center justify-center rounded text-muted-foreground hover:bg-accent hover:text-foreground"
           title="Close editor"
         >
@@ -50,7 +51,7 @@ export function HoleInlineEditor({
           value={hole.offset * 100}
           min={0} max={100} step={1}
           format={(v) => `${Math.round(v)}%`}
-          onChange={(v) => onChange({ offset: v / 100 })}
+          onChange={(v) => update({ offset: v / 100 })}
         />
         <SliderRow
           label="width"
@@ -58,7 +59,7 @@ export function HoleInlineEditor({
           value={hole.width}
           min={20} max={600} step={4}
           format={(v) => `${Math.round(v)}px`}
-          onChange={(v) => onChange({ width: v })}
+          onChange={(v) => update({ width: v })}
         />
         <SliderRow
           label="angle"
@@ -66,7 +67,7 @@ export function HoleInlineEditor({
           value={hole.angle}
           min={-90} max={90} step={1}
           format={(v) => `${Math.round(v)}°`}
-          onChange={(v) => onChange({ angle: v })}
+          onChange={(v) => update({ angle: v })}
         />
         <SliderRow
           label="speed"
@@ -74,7 +75,7 @@ export function HoleInlineEditor({
           value={speed}
           min={2} max={60} step={1}
           format={(v) => `${Math.round(v)}`}
-          onChange={(v) => onChange({ speed: v })}
+          onChange={(v) => update({ speed: v })}
         />
         <SliderRow
           label="cone"
@@ -82,20 +83,20 @@ export function HoleInlineEditor({
           value={cone}
           min={0} max={2.5} step={0.05}
           format={(v) => v.toFixed(2)}
-          onChange={(v) => onChange({ cone: v })}
+          onChange={(v) => update({ cone: v })}
         />
       </div>
       <div className="flex items-center justify-between gap-1.5 border-t border-border/40 px-2 py-1.5">
         <div className="flex items-center gap-1">
           <button
-            onClick={onMirrorH}
+            onClick={() => mirrorHole(index, "h")}
             title="Duplicate this hole, mirrored across the vertical axis"
             className="grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
             <FlipHorizontal2 className="size-3.5" strokeWidth={1.8} />
           </button>
           <button
-            onClick={onMirrorV}
+            onClick={() => mirrorHole(index, "v")}
             title="Duplicate this hole, mirrored across the horizontal axis"
             className="grid size-6 place-items-center rounded text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
           >
@@ -105,7 +106,7 @@ export function HoleInlineEditor({
         <Button
           variant="ghost"
           size="xs"
-          onClick={onDelete}
+          onClick={() => removeHole(index)}
           disabled={totalHoles <= 1}
           className="gap-1 text-muted-foreground hover:text-destructive"
         >

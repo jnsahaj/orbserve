@@ -1,18 +1,14 @@
 import { cn } from "@/lib/utils";
 import {
   type Quality,
-  type ContainerSize,
   QUALITY_PRESETS,
+  containerForAR,
   deriveQuality,
 } from "@/lib/types";
+import { useSettingsStore } from "@/stores/useSettingsStore";
+import { useSimStore } from "@/stores/useSimStore";
 
-interface Props {
-  value: Quality;
-  container: ContainerSize;
-  onChange: (q: Quality) => void;
-}
-
-const ORDER: Quality[] = ["low", "medium", "high", "ultra"];
+const ORDER: Quality[] = ["medium", "high", "ultra"];
 
 function fmtCount(n: number) {
   if (n >= 10000) return `${Math.round(n / 1000)}k`;
@@ -20,7 +16,12 @@ function fmtCount(n: number) {
   return String(n);
 }
 
-export function QualityPicker({ value, container, onChange }: Props) {
+export function QualityPicker() {
+  const value = useSettingsStore((s) => s.params.QUALITY);
+  const setParam = useSettingsStore((s) => s.setParam);
+  const imgAR = useSimStore((s) => s.imgAR);
+  const viewport = useSimStore((s) => s.viewport);
+  const container = containerForAR(imgAR, viewport);
   const derived = deriveQuality(value, container);
   return (
     <div>
@@ -30,7 +31,7 @@ export function QualityPicker({ value, container, onChange }: Props) {
           return (
             <button
               key={q}
-              onClick={() => onChange(q)}
+              onClick={() => setParam("QUALITY", q)}
               className={cn(
                 "flex-1 rounded-full px-2 py-1.5 text-[11.5px] font-medium tracking-tight transition-[colors,transform] duration-150 ease-fluid active:scale-[0.97]",
                 isSel

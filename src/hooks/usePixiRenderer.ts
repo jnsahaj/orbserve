@@ -160,19 +160,50 @@ export function usePixiRenderer(canvasRef: React.RefObject<HTMLCanvasElement>): 
     drawFrame(recX, recY, scale, N, f) {
       const s = stateRef.current;
       if (!s) return;
-      const off = f * N;
+      const f0 = Math.floor(f);
+      const t = f - f0;
+      const off0 = f0 * N;
       const inv = 1 / scale;
       const particles = s.pixiParticles;
-      for (let i = 0; i < N; i++) {
-        const p = particles[i];
-        if (!p) continue;
-        const qx = recX[off + i];
-        const qy = recY[off + i];
-        if (qx === 0 && qy === 0) {
-          p.x = -9999; p.y = -9999;
-        } else {
-          p.x = qx * inv;
-          p.y = qy * inv;
+      if (t === 0) {
+        // Integer frame — fast path, no interpolation needed.
+        for (let i = 0; i < N; i++) {
+          const p = particles[i];
+          if (!p) continue;
+          const qx = recX[off0 + i];
+          const qy = recY[off0 + i];
+          if (qx === 0 && qy === 0) {
+            p.x = -9999; p.y = -9999;
+          } else {
+            p.x = qx * inv;
+            p.y = qy * inv;
+          }
+        }
+      } else {
+        // Slow playback (playSpeed < 1) draws the same recorded frame across
+        // multiple rAFs without smoothing — visually choppy. Lerp between
+        // f0 and f0+1 to recover frame-rate feel at fractional positions.
+        const off1 = off0 + N;
+        for (let i = 0; i < N; i++) {
+          const p = particles[i];
+          if (!p) continue;
+          const qx0 = recX[off0 + i];
+          const qy0 = recY[off0 + i];
+          if (qx0 === 0 && qy0 === 0) {
+            p.x = -9999; p.y = -9999;
+            continue;
+          }
+          const qx1 = recX[off1 + i];
+          const qy1 = recY[off1 + i];
+          if (qx1 === 0 && qy1 === 0) {
+            // Particle vanishes next frame — hold current rather than lerp
+            // toward the off-screen sentinel.
+            p.x = qx0 * inv;
+            p.y = qy0 * inv;
+          } else {
+            p.x = (qx0 + (qx1 - qx0) * t) * inv;
+            p.y = (qy0 + (qy1 - qy0) * t) * inv;
+          }
         }
       }
       s.app.renderer.render(s.app.stage);

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Eye, EyeOff, Moon, Play, Sun, X } from "lucide-react";
+import { Download, Eye, EyeOff, Image as ImageIcon, Moon, Play, RotateCcw, Sliders, Sun, X } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Slider } from "@/components/ui/slider";
 import { ImagePicker } from "@/components/ImagePicker";
@@ -8,32 +8,23 @@ import { HolesPanel } from "@/components/HolesPanel";
 import { HoleEditor } from "@/components/HoleEditor";
 import { HoleInlineEditor } from "@/components/HoleInlineEditor";
 import { InfoLabel } from "@/components/InfoLabel";
-import { SAMPLES, type Drawer } from "@/lib/samples";
+import { PresetsPicker } from "@/components/PresetsPicker";
+import { Sheet } from "@/components/Sheet";
+import { SAMPLES, makeUploadDrawer, type Drawer } from "@/lib/samples";
 import {
-  type Hole,
   type Phase,
-  type SimParams,
   type WorkerMessage,
   containerForAR,
   deriveQuality,
-  makeHole,
-  mirrorH as mirrorHFn,
-  mirrorV as mirrorVFn,
 } from "@/lib/types";
 import { usePixiRenderer } from "@/hooks/usePixiRenderer";
 import { cn } from "@/lib/utils";
+import { useSettingsStore } from "@/stores/useSettingsStore";
+import { useSimStore } from "@/stores/useSimStore";
+import { useUploadsStore } from "@/stores/useUploadsStore";
 
 const LEFT_PANEL_W = 300;
 const RIGHT_PANEL_W = 320;
-
-const DEFAULT_PARAMS: SimParams = {
-  QUALITY: "medium",
-  RESTITUTION: 0.08,
-  BALL_FRICTION: 0,
-  GRAVITY: 0,
-};
-
-const DEFAULT_HOLES: Hole[] = [makeHole("bottom")];
 
 const SECTION_LABEL = "text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70";
 
@@ -41,51 +32,39 @@ export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
   const renderer = usePixiRenderer(canvasRef);
 
-  const [params, setParams] = useState<SimParams>(DEFAULT_PARAMS);
-  const [holes, setHoles] = useState<Hole[]>(DEFAULT_HOLES);
-  const [selectedHole, setSelectedHole] = useState(-1);
+  const params = useSettingsStore((s) => s.params);
+  const setParam = useSettingsStore((s) => s.setParam);
+  const theme = useSettingsStore((s) => s.theme);
+  const toggleTheme = useSettingsStore((s) => s.toggleTheme);
+  const setImageKey = useSettingsStore((s) => s.setImageKey);
+  const playSpeed = useSettingsStore((s) => s.playSpeed);
+  const setPlaySpeed = useSettingsStore((s) => s.setPlaySpeed);
 
-  const [phase, setPhase] = useState<Phase>("loading");
-  const [progress, setProgress] = useState(0);
-  const [colored, setColored] = useState(0);
-  const [hasCache, setHasCache] = useState(false);
-  // Mirror of dirtyRef. The ref is for synchronous reads inside callbacks;
-  // this drives re-renders of the Reveal CTA.
-  const [dirty, setDirty] = useState(true);
+  const [openSheet, setOpenSheet] = useState<"scene" | "physics" | null>(null);
+  const [exporting, setExporting] = useState(false);
+  const [exportProgress, setExportProgress] = useState(0);
 
-  const [imageKey, setImageKey] = useState("reveal");
-  const [imgAR, setImgAR] = useState(SAMPLES.reveal.ar);
-  const drawerRef = useRef<Drawer>(SAMPLES.reveal.draw);
+  const phase = useSimStore((s) => s.phase);
+  const progress = useSimStore((s) => s.progress);
+  const hasCache = useSimStore((s) => s.hasCache);
+  const dirty = useSimStore((s) => s.dirty);
+  const showSource = useSimStore((s) => s.showSource);
+  const viewport = useSimStore((s) => s.viewport);
+  const imgAR = useSimStore((s) => s.imgAR);
 
-  const [showSource, setShowSource] = useState(false);
-
-  const [theme, setTheme] = useState<"light" | "dark">(() => {
-    const stored = typeof localStorage !== "undefined" ? localStorage.getItem("theme") : null;
-    if (stored === "light" || stored === "dark") return stored;
-    return typeof matchMedia !== "undefined" && matchMedia("(prefers-color-scheme: dark)").matches
-      ? "dark"
-      : "light";
-  });
   useEffect(() => {
     document.documentElement.classList.toggle("dark", theme === "dark");
-    localStorage.setItem("theme", theme);
   }, [theme]);
-  const toggleTheme = useCallback(() => {
-    setTheme((t) => (t === "dark" ? "light" : "dark"));
-  }, []);
 
-  const containerSize = useMemo(() => containerForAR(imgAR), [imgAR]);
+  const containerSize = useMemo(() => containerForAR(imgAR, viewport), [imgAR, viewport]);
   const derived = useMemo(
     () => deriveQuality(params.QUALITY, containerSize),
     [params.QUALITY, containerSize],
   );
 
-  const [viewport, setViewport] = useState(() => ({
-    w: window.innerWidth,
-    h: window.innerHeight,
-  }));
   useEffect(() => {
-    const onResize = () => setViewport({ w: window.innerWidth, h: window.innerHeight });
+    const onResize = () =>
+      useSimStore.getState().setViewport({ w: window.innerWidth, h: window.innerHeight });
     window.addEventListener("resize", onResize);
     return () => window.removeEventListener("resize", onResize);
   }, []);
@@ -94,6 +73,8 @@ export default function App() {
     left: viewport.w / 2 - containerSize.w / 2,
     top: viewport.h / 2 - containerSize.h / 2,
   }), [viewport.w, viewport.h, containerSize.w, containerSize.h]);
+
+  const drawerRef = useRef<Drawer>(SAMPLES.spectrum.draw);
 
   const sourceCanvasRef = useRef<HTMLCanvasElement | null>(null);
   if (!sourceCanvasRef.current) {
@@ -129,11 +110,6 @@ export default function App() {
     total: number;
   } | null>(null);
 
-  const dirtyRef = useRef(true);
-  const markDirty = () => {
-    dirtyRef.current = true;
-    setDirty(true);
-  };
   const playingRef = useRef(false);
   const frameRef = useRef(0);
   // Seed of the most recently *requested* precompute. The handler checks
@@ -144,11 +120,17 @@ export default function App() {
   const tick = useCallback(() => {
     const rec = recRef.current;
     if (!rec || !playingRef.current) return;
-    renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, frameRef.current);
-    frameRef.current++;
+    // Pass the fractional frame so drawFrame can lerp between f0 and f0+1
+    // at slow speeds. Clamp to total-1 so we don't read past the record.
+    const f = Math.min(frameRef.current, rec.total - 1);
+    renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, f);
+    // Playback speed only affects viewing of the cached record — the precompute
+    // is unchanged. Fractional accumulation lets us go slower than 1x and skip
+    // ahead for >1x without dropping the rAF cadence.
+    frameRef.current += useSettingsStore.getState().playSpeed;
     if (frameRef.current >= rec.total) {
       playingRef.current = false;
-      setPhase("settled");
+      useSimStore.getState().setPhase("settled");
       renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, rec.total - 1);
       return;
     }
@@ -157,30 +139,36 @@ export default function App() {
 
   const newRun = useCallback(() => {
     const w = workerRef.current!;
+    const sim = useSimStore.getState();
+    const { params: p, holes } = useSettingsStore.getState();
+    const cSize = containerForAR(sim.imgAR, sim.viewport);
+    const d = deriveQuality(p.QUALITY, cSize);
+    const cLeft = sim.viewport.w / 2 - cSize.w / 2;
+    const cTop = sim.viewport.h / 2 - cSize.h / 2;
+
     const nextSeed = (Math.random() * 1e9) | 0;
     latestSeedRef.current = nextSeed;
-    setPhase("precomputing");
-    setProgress(0);
-    setShowSource(false);
+    sim.setPhase("precomputing");
+    sim.setProgress(0);
+    sim.setShowSource(false);
     playingRef.current = false;
     recRef.current = null;
     frameRef.current = 0;
     renderer.reset();
 
-    const { left: cLeft, top: cTop } = containerOrigin;
-
     renderer.clearParticles();
     renderSource();
-    renderer.showLoading(sourceCanvasRef.current!, containerSize, cLeft, cTop);
+    renderer.showLoading(sourceCanvasRef.current!, cSize, cLeft, cTop);
 
     w.onmessage = (e: MessageEvent<WorkerMessage>) => {
       const msg = e.data;
       if (msg.type === "ready") return;
       if ("seed" in msg && msg.seed !== latestSeedRef.current) return;
+      const s = useSimStore.getState();
       if (msg.type === "progress") {
-        setProgress(msg.pct / 100);
+        s.setProgress(msg.pct / 100);
       } else if (msg.type === "error") {
-        setPhase("error");
+        s.setPhase("error");
         // eslint-disable-next-line no-console
         console.error("[worker]", msg.message);
       } else if (msg.type === "done") {
@@ -191,20 +179,19 @@ export default function App() {
           N: msg.N,
           total: msg.TOTAL,
         };
-        setHasCache(true);
+        s.setHasCache(true);
         renderSource();
         renderer.reset();
         const c = renderer.bake(
           msg.recX, msg.recY, msg.scale, msg.N, msg.TOTAL,
-          sourceCanvasRef.current!, containerSize, cLeft, cTop, derived.ballRadius,
+          sourceCanvasRef.current!, cSize, cLeft, cTop, d.ballRadius,
         );
-        setColored(c);
-        dirtyRef.current = false;
-        setDirty(false);
+        s.setColored(c);
+        s.setDirty(false);
         frameRef.current = 0;
         playingRef.current = true;
-        setPhase("fountaining");
-        setProgress(1);
+        s.setPhase("fountaining");
+        s.setProgress(1);
         requestAnimationFrame(tick);
       }
     };
@@ -212,20 +199,20 @@ export default function App() {
       type: "precompute",
       seed: nextSeed,
       params: {
-        BALLS_PER_FRAME: derived.ballsPerFrame,
-        SPAWN_FRAMES: derived.spawnFrames,
-        SETTLE_FRAMES: derived.settleFrames,
-        BALL_RADIUS: derived.ballRadius,
-        RESTITUTION: params.RESTITUTION,
-        BALL_FRICTION: params.BALL_FRICTION,
-        GRAVITY: params.GRAVITY,
+        BALLS_PER_FRAME: d.ballsPerFrame,
+        SPAWN_FRAMES: d.spawnFrames,
+        SETTLE_FRAMES: d.settleFrames,
+        BALL_RADIUS: d.ballRadius,
+        RESTITUTION: p.RESTITUTION,
+        BALL_FRICTION: p.BALL_FRICTION,
+        GRAVITY: 0,
         holes,
-        containerW: containerSize.w,
-        containerH: containerSize.h,
+        containerW: cSize.w,
+        containerH: cSize.h,
       },
-      viewport: { W: viewport.w, H: viewport.h },
+      viewport: { W: sim.viewport.w, H: sim.viewport.h },
     });
-  }, [renderer, viewport, params, holes, containerSize, containerOrigin, derived, renderSource, tick]);
+  }, [renderer, renderSource, tick]);
 
   // Worker is single-threaded synchronous, so we terminate + respawn to
   // actually stop a precompute mid-flight.
@@ -233,47 +220,178 @@ export default function App() {
     workerRef.current?.terminate();
     workerRef.current = new Worker(new URL("./worker.js", import.meta.url), { type: "module" });
     latestSeedRef.current = -1;
-    setProgress(0);
+    const sim = useSimStore.getState();
+    sim.setProgress(0);
     renderer.reset();
     playingRef.current = false;
     recRef.current = null;
     frameRef.current = 0;
-    setPhase(hasCache ? "settled" : "idle");
-    dirtyRef.current = true;
-    setDirty(true);
-  }, [renderer, hasCache]);
+    sim.setPhase(sim.hasCache ? "settled" : "idle");
+    sim.setDirty(true);
+  }, [renderer]);
 
   const replay = useCallback(() => {
     if (!recRef.current) return;
-    setShowSource(false);
+    const sim = useSimStore.getState();
+    sim.setShowSource(false);
     renderer.reset();
     playingRef.current = false;
     frameRef.current = 0;
     playingRef.current = true;
-    setPhase("fountaining");
+    sim.setPhase("fountaining");
     requestAnimationFrame(tick);
   }, [renderer, tick]);
+
+  const exportVideo = useCallback(async () => {
+    const rec = recRef.current;
+    if (!rec) return;
+
+    const mimeTypes = [
+      "video/webm;codecs=vp9",
+      "video/webm;codecs=vp8",
+      "video/webm",
+    ];
+    const mimeType = mimeTypes.find((m) => MediaRecorder.isTypeSupported(m));
+    if (!mimeType) {
+      // eslint-disable-next-line no-alert
+      alert("Video export isn't supported in this browser.");
+      return;
+    }
+
+    const sim = useSimStore.getState();
+    const cSize = containerForAR(sim.imgAR, sim.viewport);
+    const cLeft = sim.viewport.w / 2 - cSize.w / 2;
+    const cTop = sim.viewport.h / 2 - cSize.h / 2;
+    const dpr = Math.min(window.devicePixelRatio || 1, 2);
+
+    setExporting(true);
+    setExportProgress(0);
+    sim.setShowSource(false);
+
+    // Stop the regular playback loop so the export tick has exclusive control.
+    playingRef.current = false;
+    renderer.reset();
+
+    // Offscreen canvas — cropped to the container with a black backdrop so
+    // the exported video has clean edges instead of transparent letterbox.
+    const exportCanvas = document.createElement("canvas");
+    exportCanvas.width = Math.round(cSize.w * dpr);
+    exportCanvas.height = Math.round(cSize.h * dpr);
+    const ctx = exportCanvas.getContext("2d")!;
+
+    // captureStream(0) means we drive frames manually via track.requestFrame()
+    // so the recording is exactly rec.total frames at 60fps.
+    const stream = exportCanvas.captureStream(0);
+    const track = stream.getVideoTracks()[0] as CanvasCaptureMediaStreamTrack;
+    const recorder = new MediaRecorder(stream, {
+      mimeType,
+      videoBitsPerSecond: 8_000_000,
+    });
+    const chunks: Blob[] = [];
+    recorder.ondataavailable = (e) => { if (e.data.size > 0) chunks.push(e.data); };
+
+    const done = new Promise<void>((resolve) => {
+      recorder.onstop = () => resolve();
+    });
+
+    recorder.start();
+
+    const pixiCanvas = canvasRef.current!;
+    let frame = 0;
+    const tickExport = () => {
+      if (frame >= rec.total) {
+        recorder.stop();
+        track.stop();
+        return;
+      }
+      // Always export at 1× regardless of the user's playSpeed.
+      renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, frame);
+      ctx.fillStyle = "#000";
+      ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+      // Copy the container region from the PIXI canvas in the same task as
+      // the render — most browsers preserve the drawing buffer for this
+      // synchronous read even with preserveDrawingBuffer:false.
+      ctx.drawImage(
+        pixiCanvas,
+        cLeft * dpr, cTop * dpr, cSize.w * dpr, cSize.h * dpr,
+        0, 0, exportCanvas.width, exportCanvas.height,
+      );
+      track.requestFrame();
+      frame++;
+      setExportProgress(frame / rec.total);
+      requestAnimationFrame(tickExport);
+    };
+    requestAnimationFrame(tickExport);
+
+    await done;
+
+    // Restore the on-screen view to the final frame.
+    frameRef.current = rec.total - 1;
+    renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, rec.total - 1);
+
+    const blob = new Blob(chunks, { type: "video/webm" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    const ts = new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-");
+    a.download = `reveal-${ts}.webm`;
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+
+    setExporting(false);
+    setExportProgress(0);
+  }, [renderer]);
 
   const toggleSource = useCallback(() => {
     const rec = recRef.current;
     if (!rec) return;
-    if (showSource) {
+    const sim = useSimStore.getState();
+    if (sim.showSource) {
       renderer.reset();
       renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, rec.total - 1);
-      setShowSource(false);
+      sim.setShowSource(false);
     } else {
-      const { left, top } = containerOrigin;
-      renderer.fadeInDom(sourceCanvasRef.current!, containerSize, left, top, () => {
+      const cSize = containerForAR(sim.imgAR, sim.viewport);
+      const left = sim.viewport.w / 2 - cSize.w / 2;
+      const top = sim.viewport.h / 2 - cSize.h / 2;
+      renderer.fadeInDom(sourceCanvasRef.current!, cSize, left, top, () => {
         renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, rec.total - 1);
       });
-      setShowSource(true);
+      sim.setShowSource(true);
     }
-  }, [renderer, showSource, containerSize, containerOrigin]);
+  }, [renderer]);
 
-  // First run on mount.
+  // First run on mount: hydrate uploads from idb, resolve drawer from the
+  // persisted imageKey (sample or upload-{id}), then kick off the sim.
   useEffect(() => {
     let cancelled = false;
     (async () => {
+      await useUploadsStore.getState().hydrate();
+      if (cancelled) return;
+      const key = useSettingsStore.getState().imageKey;
+      let drawer: Drawer = SAMPLES.spectrum.draw;
+      let ar = SAMPLES.spectrum.ar;
+      if (key in SAMPLES) {
+        drawer = SAMPLES[key].draw;
+        ar = SAMPLES[key].ar;
+      } else if (key.startsWith("upload-")) {
+        const entry = useUploadsStore.getState().getById(key);
+        if (entry) {
+          const img = await loadImage(entry.dataURL);
+          if (cancelled) return;
+          const result = makeUploadDrawer(img);
+          drawer = result.drawer;
+          ar = result.ar;
+        } else {
+          // Stale upload key (entry was wiped). Fall back to default.
+          useSettingsStore.getState().setImageKey("spectrum");
+        }
+      }
+      drawerRef.current = drawer;
+      useSimStore.getState().setImgAR(ar);
+
       await renderer.ready();
       if (cancelled) return;
       await new Promise((r) => requestAnimationFrame(r));
@@ -284,29 +402,39 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
+  const handleReset = useCallback(() => {
+    drawerRef.current = SAMPLES.spectrum.draw;
+    useSimStore.getState().setImgAR(SAMPLES.spectrum.ar);
+    useSettingsStore.getState().reset();
+  }, []);
+
   const onImageSelect = useCallback((key: string, drawer: Drawer, ar: number) => {
     drawerRef.current = drawer;
     setImageKey(key);
-    if (Math.abs(ar - imgAR) > 0.001) {
-      setImgAR(ar);
-      markDirty();
+    const sim = useSimStore.getState();
+    if (Math.abs(ar - sim.imgAR) > 0.001) {
+      sim.setImgAR(ar);
+      sim.markDirty();
       return;
     }
     // Same AR — re-bake colors in place against the existing record.
     renderSource();
     const rec = recRef.current;
     if (!rec) return;
-    const { left, top } = containerOrigin;
+    const cSize = containerForAR(sim.imgAR, sim.viewport);
+    const left = sim.viewport.w / 2 - cSize.w / 2;
+    const top = sim.viewport.h / 2 - cSize.h / 2;
+    const d = deriveQuality(useSettingsStore.getState().params.QUALITY, cSize);
     const c = renderer.bake(
       rec.recX, rec.recY, rec.scale, rec.N, rec.total,
-      sourceCanvasRef.current!, containerSize, left, top, derived.ballRadius,
+      sourceCanvasRef.current!, cSize, left, top, d.ballRadius,
     );
-    setColored(c);
+    sim.setColored(c);
     const f = playingRef.current
       ? frameRef.current
       : Math.max(0, Math.min(frameRef.current, rec.total - 1));
     renderer.drawFrame(rec.recX, rec.recY, rec.scale, rec.N, f);
-  }, [renderer, derived.ballRadius, renderSource, imgAR, containerSize, containerOrigin]);
+  }, [renderer, renderSource, setImageKey]);
 
   const lastARRef = useRef(imgAR);
   useEffect(() => {
@@ -316,102 +444,114 @@ export default function App() {
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [imgAR]);
 
-  const setParam = useCallback(<K extends keyof SimParams>(k: K, v: SimParams[K]) => {
-    setParams((p) => ({ ...p, [k]: v }));
-    markDirty();
+  // Paste support: dropping a PNG/JPG from the clipboard onto the page
+  // uploads it as a source and selects it. Skipped for input/textarea targets
+  // so it doesn't fight with text fields.
+  const onImageSelectRef = useRef(onImageSelect);
+  useEffect(() => { onImageSelectRef.current = onImageSelect; });
+  useEffect(() => {
+    const onPaste = async (e: ClipboardEvent) => {
+      const tag = (e.target as HTMLElement | null)?.tagName;
+      if (tag === "INPUT" || tag === "TEXTAREA" || tag === "SELECT") return;
+      const items = e.clipboardData?.items;
+      if (!items) return;
+      for (const item of items) {
+        if (item.kind !== "file" || !item.type.startsWith("image/")) continue;
+        e.preventDefault();
+        const file = item.getAsFile();
+        if (!file) continue;
+        const dataURL = await new Promise<string>((res, rej) => {
+          const reader = new FileReader();
+          reader.onload = () => res(reader.result as string);
+          reader.onerror = rej;
+          reader.readAsDataURL(file);
+        });
+        const img = await loadImage(dataURL);
+        const ext = (file.type.split("/")[1] || "png").replace("jpeg", "jpg");
+        const name = file.name && file.name !== "image.png"
+          ? file.name
+          : `pasted-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.${ext}`;
+        const entry = await useUploadsStore.getState().addUpload({
+          name,
+          dataURL,
+          ar: img.width / img.height,
+        });
+        const { drawer, ar } = makeUploadDrawer(img);
+        onImageSelectRef.current(entry.id, drawer, ar);
+        return;
+      }
+    };
+    window.addEventListener("paste", onPaste);
+    return () => window.removeEventListener("paste", onPaste);
   }, []);
 
-  const setHolesUpdating = useCallback((next: Hole[]) => {
-    setHoles(next);
-    markDirty();
-  }, []);
-
-  // Bind global keydown once and read latest handlers/state via refs so the
+  // Bind global keydown once and read latest handlers via refs so the
   // listener doesn't tear down + re-bind on every keystroke or slider drag.
   const newRunRef = useRef(newRun);
   const replayRef = useRef(replay);
   const cancelRef = useRef(cancelRun);
-  const stateRef = useRef({ phase, holes, selectedHole, setHolesUpdating, setSelectedHole });
   useEffect(() => {
     newRunRef.current = newRun;
     replayRef.current = replay;
     cancelRef.current = cancelRun;
-    stateRef.current = { phase, holes, selectedHole, setHolesUpdating, setSelectedHole };
   });
   useEffect(() => {
     const onKey = (e: KeyboardEvent) => {
       const tag = (e.target as HTMLElement | null)?.tagName;
       if (tag === "INPUT" || tag === "SELECT" || tag === "TEXTAREA") return;
-      const s = stateRef.current;
+      const sim = useSimStore.getState();
+      const settings = useSettingsStore.getState();
       if (e.key === "r") replayRef.current();
-      if (e.key === "Enter" && dirtyRef.current && s.phase !== "precomputing") newRunRef.current();
-      if (e.key === "Escape" && s.phase === "precomputing") cancelRef.current();
-      if ((e.key === "Backspace" || e.key === "Delete") && s.selectedHole >= 0 && s.holes.length > 1) {
-        s.setHolesUpdating(s.holes.filter((_, i) => i !== s.selectedHole));
-        s.setSelectedHole(-1);
+      if (e.key === "Enter" && sim.dirty && sim.phase !== "precomputing") newRunRef.current();
+      if (e.key === "Escape" && sim.phase === "precomputing") cancelRef.current();
+      if ((e.key === "Backspace" || e.key === "Delete") && sim.selectedHole >= 0 && settings.holes.length > 1) {
+        settings.removeHole(sim.selectedHole);
       }
     };
     window.addEventListener("keydown", onKey);
     return () => window.removeEventListener("keydown", onKey);
   }, []);
 
-  const addHole = () => {
-    const sides = ["bottom", "top", "left", "right"] as const;
-    setHolesUpdating([...holes, makeHole(sides[holes.length % sides.length])]);
-    setSelectedHole(holes.length);
-  };
-
-  const updateSelectedHole = (patch: Partial<Hole>) => {
-    if (selectedHole < 0) return;
-    setHolesUpdating(holes.map((h, i) => (i === selectedHole ? { ...h, ...patch } : h)));
-  };
-  const deleteSelectedHole = () => {
-    if (selectedHole < 0 || holes.length <= 1) return;
-    setHolesUpdating(holes.filter((_, i) => i !== selectedHole));
-    setSelectedHole(-1);
-  };
-  const mirrorSelected = (fn: (h: Hole) => Hole) => () => {
-    if (selectedHole < 0) return;
-    setHolesUpdating([...holes, fn(holes[selectedHole])]);
-    setSelectedHole(holes.length);
-  };
-
-  const phaseLabel = (
-    phase === "precomputing" ? "computing" :
-    phase === "fountaining" ? "falling" :
-    phase === "settled" ? "ready" :
-    phase
-  );
-
-  const statusDot = (
-    phase === "settled" ? "bg-foreground/80" :
-    phase === "error" ? "bg-destructive" :
-    "bg-foreground/60 animate-pulse"
-  );
-
-  const canReplay = hasCache;
-  const canNewRun = dirty || phase === "loading" || phase === "error";
+  const canReplay = hasCache && !exporting;
+  const canNewRun = (dirty || phase === "loading" || phase === "error") && !exporting;
+  const canExport = hasCache && phase !== "precomputing" && !exporting;
 
   return (
     <TooltipProvider delayDuration={150}>
       <canvas ref={canvasRef} className="fixed inset-0 z-0" />
 
-      <div
-        aria-hidden
-        className="pointer-events-none fixed inset-0 z-[1] bg-[radial-gradient(80%_60%_at_50%_0%,hsl(var(--primary)/0.10),transparent_70%),radial-gradient(80%_60%_at_50%_100%,hsl(var(--primary)/0.14),transparent_70%)]"
-      />
+      <HoleEditor />
 
-      <HoleEditor
-        holes={holes}
-        selected={selectedHole}
-        viewport={viewport}
-        container={containerSize}
-        onChange={setHolesUpdating}
-        onSelect={setSelectedHole}
-      />
+      {/* Mobile-only top bar: logo + reset + theme. Hidden on md+ since
+          those controls live in the right panel header on desktop. */}
+      <header className="pointer-events-none fixed left-3 right-3 top-3 z-[4] flex items-center justify-between md:hidden">
+        <h1 className="display pointer-events-auto text-[20px] leading-none">
+          reveal<span className="display-italic text-primary">.</span>
+        </h1>
+        <div className="pointer-events-auto flex items-center gap-1.5">
+          <button
+            type="button"
+            onClick={handleReset}
+            aria-label="Reset to defaults"
+            title="Reset to defaults"
+            className="grid size-9 place-items-center rounded-md border border-border/60 bg-card/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <RotateCcw className="size-4" />
+          </button>
+          <button
+            type="button"
+            onClick={toggleTheme}
+            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+            className="grid size-9 place-items-center rounded-md border border-border/60 bg-card/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            {theme === "dark" ? <Sun className="size-4" /> : <Moon className="size-4" />}
+          </button>
+        </div>
+      </header>
 
       <aside
-        className="fixed inset-y-0 left-0 z-10 flex flex-col overflow-hidden border-r border-border/60 glass warm-vignette"
+        className="fixed inset-y-0 left-0 z-10 hidden flex-col overflow-hidden border-r border-border/60 glass md:flex"
         style={{ width: LEFT_PANEL_W }}
       >
         <header className="flex items-baseline justify-between border-b border-border/60 px-4 py-3.5">
@@ -421,122 +561,45 @@ export default function App() {
           <span className="display-italic text-[13px] text-muted-foreground/70">scene</span>
         </header>
         <div className="flex-1 space-y-6 overflow-y-auto px-4 pb-5 pt-4">
-          <section>
-            <div className="mb-2.5">
-              <InfoLabel
-                tip="The picture you want the settled balls to recreate. Each ball samples a pixel color at its final resting position."
-                className={SECTION_LABEL}
-              >
-                Source
-              </InfoLabel>
-            </div>
-            <ImagePicker selected={imageKey} onSelect={onImageSelect} />
-          </section>
-          <section>
-            <div className="mb-2.5">
-              <InfoLabel
-                tip="Bundles ball radius, emission rate, and settle time into one knob. Total ball count is auto-sized to fill the container at the chosen density."
-                className={SECTION_LABEL}
-              >
-                Quality
-              </InfoLabel>
-            </div>
-            <QualityPicker
-              value={params.QUALITY}
-              container={containerSize}
-              onChange={(q) => setParam("QUALITY", q)}
-            />
-          </section>
+          <SceneSections onImageSelect={onImageSelect} />
         </div>
       </aside>
 
       <aside
-        className="fixed inset-y-0 right-0 z-10 flex flex-col overflow-hidden border-l border-border/60 glass warm-vignette"
+        className="fixed inset-y-0 right-0 z-10 hidden flex-col overflow-hidden border-l border-border/60 glass md:flex"
         style={{ width: RIGHT_PANEL_W }}
       >
         <header className="flex items-center justify-between border-b border-border/60 px-4 py-3.5">
           <h3 className="display text-[22px] leading-none">physics</h3>
-          <button
-            type="button"
-            onClick={toggleTheme}
-            aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
-            className="grid size-7 place-items-center rounded-md border border-border/60 bg-card/60 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
-          >
-            {theme === "dark" ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
-          </button>
+          <div className="flex items-center gap-1.5">
+            <button
+              type="button"
+              onClick={handleReset}
+              aria-label="Reset to defaults"
+              title="Reset params, holes, and source to defaults"
+              className="grid size-7 place-items-center rounded-md border border-border/60 bg-card/60 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <RotateCcw className="size-3.5" />
+            </button>
+            <button
+              type="button"
+              onClick={toggleTheme}
+              aria-label={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              title={theme === "dark" ? "Switch to light mode" : "Switch to dark mode"}
+              className="grid size-7 place-items-center rounded-md border border-border/60 bg-card/60 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              {theme === "dark" ? <Sun className="size-3.5" /> : <Moon className="size-3.5" />}
+            </button>
+          </div>
         </header>
 
         <div className="flex-1 space-y-6 overflow-y-auto px-4 pb-5 pt-4">
-          {/* Feel above Holes — Holes is variable-height, putting it last
-              keeps the slider section anchored when holes are added/edited. */}
-          <section>
-            <div className="mb-2.5">
-              <InfoLabel
-                tip="The three sliders that change how the simulation feels. Tooltips on each label explain what they do."
-                className={SECTION_LABEL}
-              >
-                Feel
-              </InfoLabel>
-            </div>
-            <BigSlider
-              label="gravity"
-              tip="Downward acceleration in pixels per frame². 0 = zero-G (balls drift on momentum and walls); 1.0 ≈ 7g (the default — fast-settling pile)."
-              value={params.GRAVITY}
-              min={0} max={2.5} step={0.05}
-              format={(v) => v.toFixed(2)}
-              onChange={(v) => setParam("GRAVITY", v)}
-            />
-            <BigSlider
-              label="restitution"
-              tip="Bounciness of ball-on-ball and ball-on-wall collisions. 0 = clay (no bounce, balls stick where they land — best for crisp lattices); 1 = perfect rebound."
-              value={params.RESTITUTION}
-              min={0} max={1} step={0.02}
-              format={(v) => v.toFixed(2)}
-              onChange={(v) => setParam("RESTITUTION", v)}
-            />
-            <BigSlider
-              label="friction"
-              tip="Coulomb friction at every contact. 0 = ice (piles slump); 1 = sandpaper (lattice grains lock in place and grain boundaries persist)."
-              value={params.BALL_FRICTION}
-              min={0} max={1} step={0.02}
-              format={(v) => v.toFixed(2)}
-              onChange={(v) => setParam("BALL_FRICTION", v)}
-            />
-          </section>
-
-          <section>
-            <div className="mb-2.5 flex items-baseline justify-between">
-              <InfoLabel
-                tip="Spots on the container walls where balls erupt from. Drag the handle on the canvas to move; drag the rotation grip to aim. Right-click a hole to delete."
-                className={SECTION_LABEL}
-              >
-                Holes
-              </InfoLabel>
-              <span className="mono text-[10.5px] tabular-nums text-muted-foreground/60">
-                {holes.length}
-              </span>
-            </div>
-            <HolesPanel
-              holes={holes}
-              selected={selectedHole}
-              onChange={setHolesUpdating}
-              onSelect={setSelectedHole}
-              onAdd={addHole}
-            />
-            {selectedHole >= 0 && holes[selectedHole] && (
-              <HoleInlineEditor
-                hole={holes[selectedHole]}
-                index={selectedHole}
-                totalHoles={holes.length}
-                onChange={updateSelectedHole}
-                onDelete={deleteSelectedHole}
-                onDeselect={() => setSelectedHole(-1)}
-                onMirrorH={mirrorSelected(mirrorHFn)}
-                onMirrorV={mirrorSelected(mirrorVFn)}
-              />
-            )}
-          </section>
+          <PhysicsSections
+            params={params}
+            setParam={setParam}
+            playSpeed={playSpeed}
+            setPlaySpeed={setPlaySpeed}
+          />
         </div>
 
         <footer className="border-t border-border/60 px-4 py-2.5">
@@ -549,10 +612,38 @@ export default function App() {
         </footer>
       </aside>
 
-      <div
-        className="pointer-events-none fixed bottom-5 z-[4] flex items-center justify-center"
-        style={{ left: LEFT_PANEL_W, right: RIGHT_PANEL_W }}
+      {/* Mobile bottom sheets — desktop renders the same content in sidebars. */}
+      <Sheet
+        open={openSheet === "scene"}
+        onClose={() => setOpenSheet(null)}
+        title="Scene"
       >
+        <SceneSections onImageSelect={onImageSelect} />
+      </Sheet>
+      <Sheet
+        open={openSheet === "physics"}
+        onClose={() => setOpenSheet(null)}
+        title="Physics"
+      >
+        <PhysicsSections
+          params={params}
+          setParam={setParam}
+          playSpeed={playSpeed}
+          setPlaySpeed={setPlaySpeed}
+        />
+      </Sheet>
+
+      <div className="pointer-events-none fixed bottom-3 left-0 right-0 z-[4] flex items-center justify-center gap-2 px-3 md:bottom-5 md:left-[300px] md:right-[320px] md:gap-0 md:px-0">
+        {/* Mobile-only Scene trigger */}
+        <button
+          type="button"
+          aria-label="Open scene panel"
+          onClick={() => setOpenSheet("scene")}
+          className="pointer-events-auto grid size-11 shrink-0 place-items-center rounded-full glass text-foreground/90 transition-colors hover:bg-foreground/[0.06] md:hidden"
+        >
+          <ImageIcon className="size-5" strokeWidth={1.8} />
+        </button>
+
         {phase === "precomputing" ? (
           <div className="pointer-events-auto relative flex h-11 items-stretch overflow-hidden rounded-full glass">
             <div className="flex items-center gap-3 pl-4 pr-3 text-[12px]">
@@ -582,18 +673,6 @@ export default function App() {
           </div>
         ) : (
           <div className="pointer-events-auto relative flex h-11 items-stretch overflow-hidden rounded-full glass">
-            <div className="flex items-center gap-2 px-4 text-[12px] tabular-nums">
-              <span className={cn("size-2 shrink-0 rounded-full transition-colors", statusDot)} />
-              <span className="font-medium tracking-tight text-foreground/90">{phaseLabel}</span>
-              <span className="text-muted-foreground/40">·</span>
-              <span className="text-muted-foreground/80">
-                <b className="font-medium text-foreground/90">{colored.toLocaleString()}</b>
-                <span className="ml-1">balls</span>
-              </span>
-            </div>
-
-            <div className="my-2 w-px bg-border/60" />
-
             <button
               onClick={replay}
               disabled={!canReplay}
@@ -604,7 +683,7 @@ export default function App() {
             </button>
             <button
               onClick={toggleSource}
-              disabled={phase !== "settled"}
+              disabled={phase !== "settled" || exporting}
               title={sourceButtonTitle(phase, showSource)}
               className={cn(
                 "grid w-10 place-items-center transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
@@ -612,6 +691,19 @@ export default function App() {
               )}
             >
               {showSource ? <EyeOff className="size-4" strokeWidth={1.8} /> : <Eye className="size-4" strokeWidth={1.8} />}
+            </button>
+            <button
+              onClick={exportVideo}
+              disabled={!canExport}
+              title={exporting ? `Exporting… ${Math.round(exportProgress * 100)}%` : "Export simulation as a video (.webm)"}
+              className={cn(
+                "grid w-10 place-items-center transition-colors hover:bg-foreground/[0.06] hover:text-foreground disabled:pointer-events-none disabled:opacity-40",
+                exporting ? "text-foreground/90" : "text-muted-foreground",
+              )}
+            >
+              {exporting
+                ? <span className="mono text-[10px] tabular-nums">{Math.round(exportProgress * 100)}%</span>
+                : <Download className="size-4" strokeWidth={1.8} />}
             </button>
 
             <div className="my-2 w-px bg-border/60" />
@@ -621,7 +713,7 @@ export default function App() {
               disabled={!canNewRun}
               title={canNewRun ? "Re-run physics with the current parameters." : "Nothing has changed since the last run."}
               className={cn(
-                "flex w-[140px] items-center justify-center gap-2 text-[13px] font-medium tracking-tight transition-colors disabled:pointer-events-none",
+                "flex w-[110px] items-center justify-center gap-2 text-[13px] font-medium tracking-tight transition-colors disabled:pointer-events-none md:w-[140px]",
                 canNewRun
                   ? "bg-primary text-primary-foreground hover:bg-primary/90"
                   : "bg-foreground/[0.05] text-muted-foreground/70",
@@ -629,7 +721,7 @@ export default function App() {
             >
               <span>Reveal</span>
               <kbd className={cn(
-                "rounded px-1.5 py-0.5 text-[10px] mono",
+                "hidden rounded px-1.5 py-0.5 text-[10px] mono md:inline-block",
                 canNewRun
                   ? "bg-primary-foreground/15 text-primary-foreground/80"
                   : "bg-foreground/[0.06] text-muted-foreground/60",
@@ -637,9 +729,141 @@ export default function App() {
             </button>
           </div>
         )}
+
+        {/* Mobile-only Physics trigger */}
+        <button
+          type="button"
+          aria-label="Open physics panel"
+          onClick={() => setOpenSheet("physics")}
+          className="pointer-events-auto grid size-11 shrink-0 place-items-center rounded-full glass text-foreground/90 transition-colors hover:bg-foreground/[0.06] md:hidden"
+        >
+          <Sliders className="size-5" strokeWidth={1.8} />
+        </button>
       </div>
     </TooltipProvider>
   );
+}
+
+function SceneSections({ onImageSelect }: { onImageSelect: (key: string, drawer: Drawer, ar: number) => void }) {
+  return (
+    <>
+      <section>
+        <div className="mb-2.5">
+          <InfoLabel
+            tip="The picture you want the settled balls to recreate. Each ball samples a pixel color at its final resting position."
+            className={SECTION_LABEL}
+          >
+            Source
+          </InfoLabel>
+        </div>
+        <ImagePicker onSelect={onImageSelect} />
+      </section>
+      <section>
+        <div className="mb-2.5">
+          <InfoLabel
+            tip="Bundles ball radius, emission rate, and settle time into one knob. Total ball count is auto-sized to fill the container at the chosen density."
+            className={SECTION_LABEL}
+          >
+            Quality
+          </InfoLabel>
+        </div>
+        <QualityPicker />
+      </section>
+      <section>
+        <div className="mb-2.5">
+          <InfoLabel
+            tip="Curated scenes that show what's possible — load one and tweak from there."
+            className={SECTION_LABEL}
+          >
+            Presets
+          </InfoLabel>
+        </div>
+        <PresetsPicker />
+      </section>
+    </>
+  );
+}
+
+function PhysicsSections({
+  params, setParam, playSpeed, setPlaySpeed,
+}: {
+  params: { RESTITUTION: number; BALL_FRICTION: number };
+  setParam: <K extends "RESTITUTION" | "BALL_FRICTION">(k: K, v: number) => void;
+  playSpeed: number;
+  setPlaySpeed: (n: number) => void;
+}) {
+  return (
+    <>
+      {/* Feel above Holes — Holes is variable-height, putting it last
+          keeps the slider section anchored when holes are added/edited. */}
+      <section>
+        <div className="mb-2.5">
+          <InfoLabel
+            tip="Sliders that change how the simulation feels — restitution and friction shape the physics, speed only affects playback."
+            className={SECTION_LABEL}
+          >
+            Feel
+          </InfoLabel>
+        </div>
+        <BigSlider
+          label="restitution"
+          tip="Bounciness of ball-on-ball and ball-on-wall collisions. 0 = clay (no bounce, balls stick where they land — best for crisp lattices); 1 = perfect rebound."
+          value={params.RESTITUTION}
+          min={0} max={1} step={0.02}
+          format={(v) => v.toFixed(2)}
+          onChange={(v) => setParam("RESTITUTION", v)}
+        />
+        <BigSlider
+          label="friction"
+          tip="Coulomb friction at every contact. 0 = ice (piles slump); 1 = sandpaper (lattice grains lock in place and grain boundaries persist)."
+          value={params.BALL_FRICTION}
+          min={0} max={1} step={0.02}
+          format={(v) => v.toFixed(2)}
+          onChange={(v) => setParam("BALL_FRICTION", v)}
+        />
+        <BigSlider
+          label="speed"
+          tip="Playback speed of the cached animation — doesn't affect the precompute, only how fast frames play. Smooth at any value thanks to interframe interpolation."
+          value={playSpeed}
+          min={0.25} max={4} step={0.25}
+          format={(v) => `${v.toFixed(2)}×`}
+          onChange={setPlaySpeed}
+        />
+      </section>
+
+      <HolesSection />
+    </>
+  );
+}
+
+function HolesSection() {
+  const holesCount = useSettingsStore((s) => s.holes.length);
+  return (
+    <section>
+      <div className="mb-2.5 flex items-baseline justify-between">
+        <InfoLabel
+          tip="Spots on the container walls where balls erupt from. Drag the handle on the canvas to move; drag the rotation grip to aim. Right-click a hole to delete."
+          className={SECTION_LABEL}
+        >
+          Holes
+        </InfoLabel>
+        <span className="mono text-[10.5px] tabular-nums text-muted-foreground/60">
+          {holesCount}
+        </span>
+      </div>
+      <HolesPanel />
+      <HoleInlineEditor />
+    </section>
+  );
+}
+
+function loadImage(src: string): Promise<HTMLImageElement> {
+  return new Promise((resolve, reject) => {
+    const img = new Image();
+    img.onload = () => resolve(img);
+    img.onerror = reject;
+    img.src = src;
+  });
 }
 
 function sourceButtonTitle(phase: Phase, showSource: boolean): string {
