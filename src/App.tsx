@@ -131,6 +131,12 @@ export default function App() {
   };
   const playingRef = useRef(false);
   const frameRef = useRef(0);
+  // Tracks the seed of the most recently *requested* precompute. Used to
+  // drop stale responses from a worker that finished an earlier request
+  // before the latest one — without this gate, the previous run's recording
+  // gets baked into the renderer with the latest closure's params, producing
+  // a "mush" of wrong-color balls landing in wrong positions.
+  const latestSeedRef = useRef(0);
 
   const tick = useCallback(() => {
     const rec = recRef.current;
@@ -152,6 +158,7 @@ export default function App() {
   const newRun = useCallback(() => {
     const w = workerRef.current!;
     const nextSeed = (Math.random() * 1e9) | 0;
+    latestSeedRef.current = nextSeed;
     setSeed(nextSeed);
     setPhase("precomputing");
     setProgress(0);
@@ -165,6 +172,9 @@ export default function App() {
     w.onmessage = (e: MessageEvent<WorkerMessage>) => {
       const msg = e.data;
       if (msg.type === "ready") return;
+      // Drop any message whose seed isn't the most recently requested one.
+      // This is the "stale precompute" guard described above latestSeedRef.
+      if ("seed" in msg && msg.seed !== latestSeedRef.current) return;
       if (msg.type === "progress") {
         setProgress(msg.pct / 100);
       } else if (msg.type === "error") {

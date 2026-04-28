@@ -93,6 +93,7 @@ export interface PrecomputeMessage {
 
 export interface PrecomputeResult {
   type: "done";
+  seed: number;
   elapsedMs: number;
   recX: Uint16Array;
   recY: Uint16Array;
@@ -104,8 +105,8 @@ export interface PrecomputeResult {
 
 export type WorkerMessage =
   | { type: "ready" }
-  | { type: "progress"; frame: number; total: number; pct: number }
-  | { type: "error"; message: string }
+  | { type: "progress"; seed: number; frame: number; total: number; pct: number }
+  | { type: "error"; seed: number; message: string }
   | PrecomputeResult;
 
 export const baseAnglesByside: Record<HoleSide, number> = {

@@ -23,17 +23,22 @@ import RAPIER from "@dimforge/rapier2d-simd-compat";
 await RAPIER.init();
 self.postMessage({ type: "ready" });
 
+// Each precompute is a long synchronous block. If the main thread queues a
+// new request while one is running, the in-flight one finishes first and
+// posts "done" before the new request is even processed. We echo the seed on
+// every message so the main thread can drop stale responses by matching seed.
 self.onmessage = (e) => {
   if (e.data?.type !== "precompute") return;
+  const seed = e.data.seed;
   const t0 = performance.now();
   try {
-    const result = precompute(e.data.params, e.data.seed, e.data.viewport);
+    const result = precompute(e.data.params, seed, e.data.viewport);
     self.postMessage(
-      { type: "done", elapsedMs: performance.now() - t0, ...result },
+      { type: "done", seed, elapsedMs: performance.now() - t0, ...result },
       [result.recX.buffer, result.recY.buffer],
     );
   } catch (err) {
-    self.postMessage({ type: "error", message: String(err?.stack || err) });
+    self.postMessage({ type: "error", seed, message: String(err?.stack || err) });
   }
 };
 
@@ -327,7 +332,7 @@ function precompute(params, seed, viewport) {
     const pct = (f * 100 / TOTAL) | 0;
     if (pct !== lastPct && (pct % 2) === 0) {
       lastPct = pct;
-      self.postMessage({ type: "progress", frame: f, total: TOTAL, pct });
+      self.postMessage({ type: "progress", seed, frame: f, total: TOTAL, pct });
     }
 
     // Early termination: spawning done AND every body is asleep → the rest
