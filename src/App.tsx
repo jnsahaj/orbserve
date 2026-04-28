@@ -27,7 +27,7 @@ const DEFAULT_PARAMS: SimParams = {
   QUALITY: "medium",
   RESTITUTION: 0.08,
   BALL_FRICTION: 0.55,
-  GRAVITY: 1.0,
+  GRAVITY: 0,
 };
 
 const DEFAULT_HOLES: Hole[] = [

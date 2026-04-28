@@ -151,7 +151,10 @@ function precompute(params, seed, viewport) {
 
   // Resolve each hole into world-space center + outward direction +
   // tangent (along which the spawn band extends). All in meters.
-  const inset = rM + 0.02;            // spawn just inside the wall
+  // Spawn the ball center exactly one radius from the wall so the ball's
+  // edge is flush with the wall — visually it reads as emerging from the
+  // wall rather than hovering above it.
+  const inset = rM;
   const holesIn = (params.holes && params.holes.length > 0)
     ? params.holes
     : [{ side: "bottom", offset: 0.5, width: 100 }];
