@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Download, Eye, EyeOff, Image as ImageIcon, Moon, Play, RotateCcw, Sliders, Sun, X } from "lucide-react";
+import { Download, Eye, EyeOff, Github, Image as ImageIcon, Moon, Play, RotateCcw, Sliders, Sun, X } from "lucide-react";
 import { TooltipProvider } from "@/components/ui/tooltip";
 import { Slider } from "@/components/ui/slider";
 import { ImagePicker } from "@/components/ImagePicker";
@@ -27,6 +27,7 @@ const LEFT_PANEL_W = 300;
 const RIGHT_PANEL_W = 320;
 
 const SECTION_LABEL = "text-[10px] font-medium uppercase tracking-[0.14em] text-muted-foreground/70";
+const GITHUB_URL = "https://github.com/jnsahaj/orbserve";
 
 export default function App() {
   const canvasRef = useRef<HTMLCanvasElement>(null);
@@ -541,6 +542,16 @@ export default function App() {
           <BrandWord />
         </h1>
         <div className="pointer-events-auto flex items-center gap-1.5">
+          <a
+            href={GITHUB_URL}
+            target="_blank"
+            rel="noreferrer"
+            aria-label="Open GitHub repository"
+            title="Open GitHub repository"
+            className="grid size-9 place-items-center rounded-md border border-border/60 bg-card/70 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+          >
+            <Github className="size-4" />
+          </a>
           <button
             type="button"
             onClick={handleReset}
@@ -584,6 +595,16 @@ export default function App() {
         <header className="flex items-center justify-between border-b border-border/60 px-4 py-3.5">
           <h3 className="display text-[22px] leading-none">physics</h3>
           <div className="flex items-center gap-1.5">
+            <a
+              href={GITHUB_URL}
+              target="_blank"
+              rel="noreferrer"
+              aria-label="Open GitHub repository"
+              title="Open GitHub repository"
+              className="grid size-7 place-items-center rounded-md border border-border/60 bg-card/60 text-muted-foreground transition-colors hover:bg-accent hover:text-foreground"
+            >
+              <Github className="size-3.5" />
+            </a>
             <button
               type="button"
               onClick={handleReset}
