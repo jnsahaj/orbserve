@@ -1,14 +1,14 @@
-import { ArrowDown, ArrowLeft, ArrowRight, ArrowUp, Plus, Trash2 } from "lucide-react";
+import { ArrowUp, Plus, Trash2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { type HoleSide } from "@/lib/types";
 import { useSettingsStore } from "@/stores/useSettingsStore";
 import { useSimStore } from "@/stores/useSimStore";
 
-const SIDE_ICON: Record<HoleSide, typeof ArrowDown> = {
-  bottom: ArrowDown,
-  top:    ArrowUp,
-  left:   ArrowLeft,
-  right:  ArrowRight,
+const BASE_ANGLES_BY_SIDE: Record<HoleSide, number> = {
+  bottom: 0,
+  top:    180,
+  left:   90,
+  right:  270,
 };
 
 export function HolesPanel() {
@@ -24,8 +24,8 @@ export function HolesPanel() {
     <div>
       <ul className="overflow-hidden rounded-lg border border-border/60 bg-foreground/[0.025]">
         {holes.map((h, i) => {
-          const Icon = SIDE_ICON[h.side];
           const isSel = i === selected;
+          const totalRotation = BASE_ANGLES_BY_SIDE[h.side] + (h.angle || 0);
           return (
             <li
               key={i}
@@ -46,7 +46,11 @@ export function HolesPanel() {
                       : "border-border/70 bg-card/40 text-muted-foreground",
                   )}
                 >
-                  <Icon className="size-3" strokeWidth={2} />
+                  <ArrowUp
+                    className="size-3"
+                    strokeWidth={2}
+                    style={{ transform: `rotate(${totalRotation}deg)` }}
+                  />
                 </span>
                 <span className="flex flex-1 items-baseline gap-1.5">
                   <span className="text-[12px] font-medium tracking-tight">
